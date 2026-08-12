@@ -233,7 +233,85 @@ def build_1978():
     (OUT / "summer_1978.html").write_text("".join(parts), encoding="utf-8")
 
 
+def build_1978_real():
+    """実記事のレイアウトを模したフィクスチャ(1978年夏)。
+
+    build_1978() が箇条書きの「素直な」形なのに対し、こちらは実記事で踏んだ地雷を
+    最小構成(4校/3試合)で再現し、回帰で固定する:
+
+      - 概要 infobox の「出場校」行が school 列と誤検出され、後続の
+        「優勝校 / 試合数 / …」がダミー出場校として混入する。
+      - 東日本/西日本 wikitable を包む multicol ラッパを親としても解析すると
+        出場校が二重取りになる。
+      - 決勝はイニングスコア表だけに載り、しかもヘッダ(1 2 3 … R H)が
+        先頭行ではなく2行目にある。
+    """
+    p = ["<div class='mw-parser-output'>"]
+
+    # (地雷1) 概要 infobox — 「出場校」ラベルが school と誤検出される
+    p.append(
+        "<table class='infobox'>"
+        "<tr><th colspan='2'>第60回全国高等学校野球選手権大会</th></tr>"
+        "<tr><th>試合日程</th><td>1978年8月8日-20日</td></tr>"
+        "<tr><th>出場校</th><td>49校</td></tr>"
+        "<tr><th>優勝校</th><td>PL学園(大阪)</td></tr>"
+        "<tr><th>試合数</th><td>48試合</td></tr>"
+        "<tr><th>選手宣誓</th><td>某(某校)</td></tr>"
+        "<tr><th>始球式</th><td>某</td></tr>"
+        "<tr><th>大会本塁打</th><td>0本</td></tr>"
+        "<tr><td colspan='2'>テンプレートを表示</td></tr>"
+        "</table>"
+    )
+
+    # (地雷2) 東日本/西日本 wikitable を multicol ラッパで横並び(ネスト表)
+    east = [("愛知", "中京", "2年ぶり18回目"), ("長野", "松商学園", "4年連続23回目")]
+    west = [("大阪", "PL学園", "2年ぶり6回目"), ("高知", "高知商", "5年ぶり11回目")]
+
+    def entries_table(banner, rows):
+        body = "".join(
+            f"<tr><td>{q}</td><td>{s}</td><td>{a}</td></tr>" for q, s, a in rows
+        )
+        return (
+            "<table class='wikitable'>"
+            f"<tr><th colspan='3'>{banner}</th></tr>"
+            "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+            f"{body}</table>"
+        )
+
+    p.append("<h2>代表校</h2>")
+    p.append(
+        "<table class='multicol'><tr>"
+        f"<td>{entries_table('東日本', east)}</td>"
+        f"<td>{entries_table('西日本', west)}</td>"
+        "</tr></table>"
+    )
+
+    # 試合結果: 準決勝は箇条書き、決勝はイニングスコアのみ
+    p.append("<h2>試合結果</h2>")
+    p.append("<h3>準決勝</h3><ul>"
+             "<li>PL学園 3 - 1 松商学園</li>"
+             "<li>高知商 4 - 2 中京</li>"
+             "</ul>")
+
+    # (地雷3) 決勝 = イニングスコア表。ヘッダは2行目、総得点列は R
+    innings = "".join(f"<td>{v}</td>" for v in [0, 0, 1, 0, 0, 1, 0, 0, 0])  # 見た目用
+    p.append(
+        "<h3>決勝</h3>"
+        "<table class='wikitable'>"
+        "<tr><th colspan='12'>スコアボード</th></tr>"
+        "<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>"
+        "<th>6</th><th>7</th><th>8</th><th>9</th><th>R</th><th>H</th></tr>"
+        f"<tr><td>高知商</td>{innings}<td>2</td><td>6</td></tr>"
+        f"<tr><td>PL学園</td>{innings}<td>3</td><td>8</td></tr>"
+        "</table>"
+    )
+
+    p.append("</div>")
+    (OUT / "summer_1978_real.html").write_text("".join(p), encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
+    build_1978_real()
     print("fixtures written to", OUT)

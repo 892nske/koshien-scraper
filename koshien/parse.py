@@ -148,18 +148,53 @@ def _detect_group(headers: list[str]) -> tuple[int, list[str | None]]:
     return n, fields
 
 
+def _find_header_row(grid: list[list[str]], max_scan: int = 4) -> tuple[int, int, list]:
+    """ヘッダ行を先頭数行から探す。
+
+    実記事の出場校表は先頭行が「東日本 / 西日本」のような見出し行で、
+    実際の列名はその次の行にあることが多い。先頭行決め打ちだと全滅する。
+    戻り値: (ヘッダ行index, グループ幅, フィールド並び)
+    """
+    best = (-1, len(grid[0]) if grid else 1, [])
+    best_score = 0
+    for i, row in enumerate(grid[:max_scan]):
+        group, fields = _detect_group(row)
+        named = [f for f in fields if f]
+        if "school" not in named:
+            continue
+        score = len(set(named))
+        if score > best_score:
+            best_score = score
+            best = (i, group, fields)
+    return best
+
+
+# 出場校表ではありえないテーブル。概要 infobox は「出場校 / 優勝校 / 試合数 …」の
+# 2列表で、「出場校」行が school 列と誤検出されると後続行がダミー出場校になる。
+_SKIP_ENTRY_TABLE_CLASSES = frozenset(
+    {"infobox", "navbox", "vertical-navbox", "navbox-inner", "ambox", "metadata"}
+)
+
+
 def parse_entries(soup: BeautifulSoup, season: str) -> list[EntryRow]:
     root = soup.select_one(".mw-parser-output") or soup
     entries: list[EntryRow] = []
     seen: set[str] = set()
 
     for table in root.find_all("table"):
+        # infobox/navbox は出場校表ではない。multicol 等のレイアウト用ラッパは
+        # 中の実テーブルが find_all で別途拾われるため、ラッパ自身を解析すると
+        # 二重取りになる(decompose ではなく continue で飛ばす — 子表を巻き込まない)。
+        if _SKIP_ENTRY_TABLE_CLASSES.intersection(table.get("class") or ()):
+            continue
+        if table.find("table") is not None:
+            continue
+
         grid = table_to_grid(table)
         if len(grid) < 2:
             continue
-        headers = grid[0]
-        group, fields = _detect_group(headers)
-        if "school" not in [f for f in fields if f]:
+        header_idx, group, fields = _find_header_row(grid)
+        if header_idx < 0:
             continue
 
         # 表の直前の見出しに21世紀枠の記載があるか
@@ -169,7 +204,7 @@ def parse_entries(soup: BeautifulSoup, season: str) -> list[EntryRow]:
             heading_text = normalize_text(prev.get_text(" ", strip=True))
         table_is_21c = "21世紀枠" in heading_text
 
-        for row in grid[1:]:
+        for row in grid[header_idx + 1:]:
             for start in range(0, len(row), group):
                 chunk = row[start:start + group]
                 rec: dict[str, str] = {}
@@ -248,8 +283,15 @@ def parse_games_table(root: Tag) -> list[GameRow]:
         grid = table_to_grid(table)
         if not grid:
             continue
-        headers = [normalize_text(h) for h in grid[0]]
-        if not any("勝利" in h for h in headers) or not any("敗戦" in h for h in headers):
+        # ヘッダ行は必ずしも先頭行ではない
+        header_idx = -1
+        headers: list[str] = []
+        for i, row in enumerate(grid[:4]):
+            cells = [normalize_text(h) for h in row]
+            if any("勝利" in h for h in cells) and any("敗戦" in h for h in cells):
+                header_idx, headers = i, cells
+                break
+        if header_idx < 0:
             continue
 
         idx = {}
@@ -279,7 +321,7 @@ def parse_games_table(root: Tag) -> list[GameRow]:
 
         cur_date = None
         cur_day = None
-        for row in grid[1:]:
+        for row in grid[header_idx + 1:]:
             if len(row) <= max(idx.values()):
                 continue
             if "date" in idx and row[idx["date"]]:
@@ -365,11 +407,112 @@ def parse_games_list(root: Tag) -> list[GameRow]:
     return games
 
 
+def parse_linescores(root: Tag) -> list[GameRow]:
+    """イニングスコア(スコアボード)形式の試合を抽出する。
+
+    実記事では決勝(および一部の注目試合)が一覧表ではなく
+    イニングごとの得点表で掲載されており、一覧表からは漏れる。
+
+        | チーム | 1 | 2 | ... | 9 | 計 |
+        | 三重   | 0 | 0 | ... | 0 | 3  |
+        | 大阪桐蔭 | 1 | 0 | ... | X | 4  |
+
+    先攻が上段という野球の記載慣習を利用し、打順もここから復元できる。
+    """
+    games: list[GameRow] = []
+    for table in root.find_all("table"):
+        grid = table_to_grid(table)
+        if len(grid) < 3:
+            continue
+
+        # ヘッダ(1 2 3 … の列)は先頭行とは限らない。実記事の決勝スコアボードは
+        # 1行目が「スコアボード」等のバナーで、列番号は2行目にあることが多い。
+        header_idx = -1
+        header: list[str] = []
+        digit_cols: list[int] = []
+        for i, row in enumerate(grid[:4]):
+            cells = [normalize_text(c) for c in row]
+            dcols = [j for j, c in enumerate(cells) if c.isdigit()]
+            if len(dcols) >= 6 and [int(cells[j]) for j in dcols][:3] == [1, 2, 3]:
+                header_idx, header, digit_cols = i, cells, dcols
+                break
+        if header_idx < 0:
+            continue
+
+        total_col = None
+        for i, c in enumerate(header):
+            if c in ("計", "R", "得点", "合計"):
+                total_col = i
+        if total_col is None:
+            total_col = max(digit_cols) + 1
+        if total_col >= len(header):
+            continue
+
+        rows = []
+        for row in grid[header_idx + 1:]:
+            if len(row) <= total_col:
+                continue
+            name = normalize_text(row[0])
+            total = normalize_text(row[total_col])
+            if not name or name.isdigit() or not total.isdigit():
+                continue
+            innings_cells = [normalize_text(row[i]) for i in digit_cols if i < len(row)]
+            rows.append((name, int(total), innings_cells))
+        if len(rows) < 2:
+            continue
+
+        rc = None
+        prev = table.find_previous(["h2", "h3", "h4"])
+        if prev:
+            rc = round_code_from_label(prev.get_text(" ", strip=True))
+
+        for a, b in zip(rows[::2], rows[1::2], strict=False):
+            (n1, t1, _inn1), (n2, t2, _inn2) = a, b
+            if t1 == t2:
+                win, lose, ws, ls, draw = n1, n2, t1, t2, True
+            elif t1 > t2:
+                win, lose, ws, ls, draw = n1, n2, t1, t2, False
+            else:
+                win, lose, ws, ls, draw = n2, n1, t2, t1, False
+            games.append(GameRow(
+                round_code=rc,
+                winner_name=win, loser_name=lose,
+                winner_score=ws, loser_score=ls,
+                is_draw=draw,
+                is_walkoff=False,          # サヨナラ判定は一覧表/箇条書き側を優先
+                first_bat_name=n1,          # 上段が先攻
+                # 9イニングを超える列がある場合のみ延長と判断する
+                innings=len(digit_cols) if len(digit_cols) > 9 else None,
+                note="linescore",
+                raw=f"{n1} {t1} - {t2} {n2}",
+            ))
+    return games
+
+
+def _pair_key(g: GameRow) -> frozenset:
+    return frozenset({normalize_school(g.winner_name or ""),
+                      normalize_school(g.loser_name or "")})
+
+
 def parse_games(soup: BeautifulSoup) -> list[GameRow]:
     root = soup.select_one(".mw-parser-output") or soup
     games = parse_games_table(root)
     if len(games) < 10:                 # 表が無ければ箇条書き形式とみなす
         games = parse_games_list(root)
+
+    # 一覧表/箇条書きから漏れた試合(主に決勝)をスコアボードから補完する
+    known = {_pair_key(g) for g in games}
+    for g in parse_linescores(root):
+        if _pair_key(g) not in known:
+            games.append(g)
+            known.add(_pair_key(g))
+        else:
+            # 既知の試合でも、打順が未判明なら補完する
+            for e in games:
+                if _pair_key(e) == _pair_key(g) and e.first_bat_name is None:
+                    e.first_bat_name = g.first_bat_name
+                    break
+
     games = mark_replays(games)
     if any(g.round_code is None for g in games):
         games = assign_rounds_by_bracket(games)
