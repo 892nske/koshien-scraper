@@ -471,10 +471,76 @@ def build_dupname_summer():
     (OUT / "summer_dupname.html").write_text(html, encoding="utf-8")
 
 
+def build_mixed_format_summer():
+    """試合結果の書式が混在する年(1991 夏を模写)。
+
+    同じ大会で 1回戦=箇条書き / 後半=一覧表 / 決勝=イニングスコア のように
+    書式が混ざる。表と箇条書きのどちらか一方だけを見ると試合を取りこぼす。
+    加えて「概要」節の説明文(ラウンド見出しの外)が試合として誤検出されないこと。
+    """
+    prefs = ["北北海道", "青森", "岩手", "宮城", "茨城", "群馬", "東東京", "神奈川",
+             "新潟", "静岡", "愛知", "大阪", "兵庫", "広島", "三重", "長崎"]
+    schools = ["旭川竜谷", "青森山田", "盛岡大付", "仙台育英", "常総学院", "前橋育英",
+               "帝京", "横浜", "日本文理", "静岡", "中京", "PL学園", "報徳学園",
+               "広陵", "四日市工", "海星"]
+    ent_rows = "".join(
+        f"<tr><td>{q}</td><td>{s}</td><td>初出場</td></tr>"
+        for q, s in zip(prefs, schools, strict=True)
+    )
+    entries_tbl = (
+        "<h2>出場校</h2><table class='wikitable'>"
+        "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    # 決定的なトーナメント。先頭 index が勝つ。rounds[0]=8, [1]=4, [2]=2, [3]=1 試合。
+    rounds, cur, day = [], list(schools), 10
+    while len(cur) > 1:
+        rnd, nxt, i = [], [], 0
+        while i + 1 < len(cur):
+            rnd.append((cur[i], cur[i + 1]))     # (勝者, 敗者)
+            nxt.append(cur[i])
+            i += 2
+        rounds.append(rnd)
+        cur, day = nxt, day + 1
+
+    # 概要: 説明文の箇条書き(ラウンド見出し外=round_code None → 試合として拾わない)
+    overview = ("<h2>概要</h2><ul><li>8月20日-決勝戦が行われ"
+                f"{schools[0]}が{schools[5]}を 1-0 で下し初優勝。</li></ul>")
+
+    games = "<h2>試合結果</h2>"
+    # 1回戦(8)+準々決勝(4)を一覧表 → 表=12(≥10)
+    for label, rnd in [("1回戦", rounds[0]), ("準々決勝", rounds[1])]:
+        rows = [(f"8月{d}日", f"第{i+1}試合", w, "2 - 1", lo, "")
+                for i, (w, lo) in enumerate(rnd) for d in [15]]
+        games += f"<h3>{label}</h3>" + game_table(rows)
+    # 準決勝(2)を箇条書き
+    sf = rounds[2]
+    games += "<h3>準決勝</h3><ul>" + "".join(
+        f"<li>{w} 3 - 1 {lo}</li>" for w, lo in sf) + "</ul>"
+    # 決勝(1)をイニングスコア
+    fw, fl = rounds[3][0]
+    innings = "".join(f"<td>{v}</td>" for v in [0, 0, 1, 0, 0, 1, 0, 0, 0])
+    games += (
+        "<h3>決勝</h3>"
+        "<table class='wikitable'>"
+        "<tr><th colspan='12'>スコアボード</th></tr>"
+        "<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>"
+        "<th>6</th><th>7</th><th>8</th><th>9</th><th>R</th><th>H</th></tr>"
+        f"<tr><td>{fl}</td>{innings}<td>2</td><td>6</td></tr>"
+        f"<tr><td>{fw}</td>{innings}<td>3</td><td>8</td></tr>"
+        "</table>"
+    )
+
+    html = f"<div class='mw-parser-output'>{entries_tbl}{overview}{games}</div>"
+    (OUT / "summer_mixed.html").write_text(html, encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
     build_1978_real()
     build_1978_spring()
     build_dupname_summer()
+    build_mixed_format_summer()
     print("fixtures written to", OUT)

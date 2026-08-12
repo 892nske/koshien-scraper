@@ -15,6 +15,7 @@ def _ensure_fixtures():
         build_1978_spring,
         build_2014,
         build_dupname_summer,
+        build_mixed_format_summer,
     )
 
     fix = Path(__file__).parent / "fixtures"
@@ -28,3 +29,5 @@ def _ensure_fixtures():
         build_1978_spring()
     if not (fix / "summer_dupname.html").exists():
         build_dupname_summer()
+    if not (fix / "summer_mixed.html").exists():
+        build_mixed_format_summer()

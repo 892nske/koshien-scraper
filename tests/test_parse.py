@@ -159,6 +159,24 @@ def test_duplicate_name_schools():
     print("  OK: 同名校・別県の名寄せ")
 
 
+def test_mixed_table_and_list():
+    """試合結果が表形式と箇条書きで混在していても、両方を統合して拾えること。"""
+    html = (FIX / "summer_mixed.html").read_text(encoding="utf-8")
+    td = parse_page(html, 1991, "summer", "fixture-mixed", 0)
+
+    # 16校 → 15試合。表由来(準々決勝)と箇条書き由来(準決勝)が両方含まれる。
+    assert len(td.games) == 15, [(g.round_code, g.raw) for g in td.games]
+    assert Counter(g.round_code for g in td.games) == Counter(
+        {"r1": 8, "qf": 4, "sf": 2, "f": 1}), Counter(g.round_code for g in td.games)
+
+    # 概要節の説明文は試合として拾わない(長い散文が winner に混じらない)
+    assert all(len(g.winner_name) <= 12 for g in td.games), \
+        [g.winner_name for g in td.games]
+
+    assert not [i for i in validate(td) if i.level == "error"], validate(td)
+    print("  OK: 表と箇条書きの混在")
+
+
 def test_validation_catches_breakage():
     """試合を1件削れば検証がエラーを出すこと。"""
     td = load("summer_2014.html", 2014)
@@ -175,5 +193,6 @@ if __name__ == "__main__":
     test_normalize_school_aliases()
     test_bracket_format()
     test_duplicate_name_schools()
+    test_mixed_table_and_list()
     test_validation_catches_breakage()
     print("すべて通過")

@@ -645,7 +645,15 @@ def _pair_key(g: GameRow) -> frozenset:
 def parse_games(soup: BeautifulSoup) -> list[GameRow]:
     root = soup.select_one(".mw-parser-output") or soup
     games = parse_games_table(root)
-    if len(games) < 10:                 # 表が無ければ箇条書き形式とみなす
+    if len(games) >= 10:                 # 表が主。書式が混在する年は箇条書きで補完する
+        known = {_pair_key(g) for g in games}
+        for g in parse_games_list(root):
+            # ラウンド見出し配下(round_code 有)の試合だけ拾う。
+            # 概要節の説明文は _SCORE_RE に誤マッチするが round_code=None なので除外される。
+            if g.round_code and _pair_key(g) not in known:
+                games.append(g)
+                known.add(_pair_key(g))
+    else:                               # 表が乏しければ箇条書きが主
         games = parse_games_list(root)
     if len(games) < 10:                 # それも無ければトーナメント表形式(主に春)
         bracket = parse_bracket(root)
