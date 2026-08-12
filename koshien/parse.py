@@ -161,7 +161,9 @@ def _find_header_row(grid: list[list[str]], max_scan: int = 4) -> tuple[int, int
     for i, row in enumerate(grid[:max_scan]):
         group, fields = _detect_group(row)
         named = [f for f in fields if f]
-        if "school" not in named:
+        # school 単独の表(「記録」表の校名列など)は出場校表ではない。
+        # 正規の出場校表は school + 地方大会/都道府県/出場回数 等を必ず持つ。
+        if "school" not in named or len(set(named)) < 2:
             continue
         score = len(set(named))
         if score > best_score:

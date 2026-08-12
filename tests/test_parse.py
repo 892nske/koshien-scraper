@@ -6,6 +6,7 @@
 from collections import Counter
 from pathlib import Path
 
+from koshien.normalize import normalize_school
 from koshien.parse import parse_page
 from koshien.validate import validate
 
@@ -94,6 +95,19 @@ def test_real_article_pitfalls():
     print("  OK: 実記事レイアウト (1978)")
 
 
+def test_normalize_school_aliases():
+    """校名の名寄せ: 改称・脚注マーカーを吸収し、既存の接尾辞/括弧除去は不変。"""
+    # 旧校名 → 現校名(明徳 → 明徳義塾)
+    assert normalize_school("明徳") == normalize_school("明徳義塾")
+    # 脚注マーカー [注釈N] / [N] を除去
+    assert normalize_school("龍谷大平安[注釈4]") == normalize_school("龍谷大平安")
+    assert normalize_school("高松商[注釈10]") == normalize_school("高松商")
+    # 既存の接尾辞・括弧除去は不変
+    assert normalize_school("大阪桐蔭高等学校") == normalize_school("大阪桐蔭")
+    assert normalize_school("大阪桐蔭高") == normalize_school("大阪桐蔭")
+    print("  OK: 校名の名寄せ")
+
+
 def test_bracket_format():
     """トーナメント表 + 箇条書き出場校(1978年春を模写)。
 
@@ -142,6 +156,7 @@ if __name__ == "__main__":
     test_table_format()
     test_list_format()
     test_real_article_pitfalls()
+    test_normalize_school_aliases()
     test_bracket_format()
     test_validation_catches_breakage()
     print("すべて通過")

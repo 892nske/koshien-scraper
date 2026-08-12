@@ -406,6 +406,16 @@ def build_1978_spring():
         "</table>"
     )
 
+    # 記録(大会記録)表。「校名」列を持つが出場校表ではない。出場校表として
+    # 誤検出されると箇条書きフォールバックが抑止され entries が壊れる(1984春の地雷)。
+    p.append(
+        "<h2>記録</h2>"
+        "<table class='wikitable'>"
+        "<tr><th>記録</th><th>校名</th><th>対戦校</th><th>補足</th></tr>"
+        "<tr><td>1試合最多本塁打</td><td>浜松商</td><td>1回戦・前橋</td><td>大会タイ</td></tr>"
+        "</table>"
+    )
+
     p.append("</div>")
     (OUT / "spring_1978.html").write_text("".join(p), encoding="utf-8")
 

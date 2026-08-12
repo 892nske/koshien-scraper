@@ -28,16 +28,21 @@ def normalize_text(s: str) -> str:
     return s.strip()
 
 
+# 旧校名 → 現校名。同一校が別表記になる改称を名寄せする(必要に応じて追記)。
+_SCHOOL_RENAMES = {"明徳": "明徳義塾"}
+
+
 def normalize_school(name: str) -> str:
     """校名の名寄せキー。「大阪桐蔭高等学校」「大阪桐蔭高」→「大阪桐蔭」"""
     s = normalize_text(name)
     s = s.translate(_CHAR_MAP)
     s = re.sub(r"[（(].*?[)）]", "", s)              # 括弧内(都道府県など)を除去
+    s = re.sub(r"[\[［].*?[\]］]", "", s)            # 脚注 [注釈N] などを除去
     for suf in sorted(_SUFFIXES, key=len, reverse=True):
         if s.endswith(suf):
             s = s[: -len(suf)]
             break
-    return s
+    return _SCHOOL_RENAMES.get(s, s)                # 旧校名 → 現校名
 
 
 def parse_appearance(text: str) -> dict:
