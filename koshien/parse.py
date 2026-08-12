@@ -554,6 +554,9 @@ def _bracket_date_innings(label: str | None) -> tuple[str | None, int | None]:
     return gdate, innings
 
 
+_BRACKET_SCORE_RE = re.compile(r"^(\d+)([xX])?$")   # 末尾 x = サヨナラ(勝者=後攻)
+
+
 def parse_bracket(root: Tag) -> list[GameRow]:
     """トーナメント表(ブラケット)形式の試合を抽出する。
 
@@ -583,7 +586,7 @@ def parse_bracket(root: Tag) -> list[GameRow]:
             continue
 
         for name_col, score_col, code in round_cols:
-            teams: list[tuple[str, int, str | None]] = []   # (校名, 得点, 直前の日付)
+            teams: list[tuple[str, int, bool, str | None]] = []  # (校名,得点,サヨナラ,日付)
             pending_date: str | None = None
             prev: tuple[str, str] | None = None
             for r in range(1, len(grid)):
@@ -596,25 +599,29 @@ def parse_bracket(root: Tag) -> list[GameRow]:
                     pending_date = name
                     prev = None
                     continue
-                if not name or not score.isdigit():
+                m = _BRACKET_SCORE_RE.match(score)   # 末尾 x(サヨナラ)も許容する
+                if not name or not m:
                     continue
                 if prev == (name, score):          # rowspan による複製
                     continue
                 prev = (name, score)
-                teams.append((name, int(score), pending_date))
+                teams.append((name, int(m.group(1)), bool(m.group(2)), pending_date))
 
             for k in range(0, len(teams) - 1, 2):  # 連続2件で1試合
-                (n1, s1, d1), (n2, s2, _d2) = teams[k], teams[k + 1]
+                (n1, s1, x1, d1), (n2, s2, x2, _d2) = teams[k], teams[k + 1]
                 if s1 >= s2:
                     win, ws, lose, ls = n1, s1, n2, s2
                 else:
                     win, ws, lose, ls = n2, s2, n1, s1
+                walkoff = x1 or x2                 # x は勝者=後攻に付く
                 gdate, innings = _bracket_date_innings(d1)
                 collected.append((code, GameRow(
                     round_code=None,               # 構造から逆算させる
                     game_date=gdate,
                     winner_name=win, winner_score=ws,
                     loser_name=lose, loser_score=ls,
+                    is_walkoff=walkoff,
+                    first_bat_name=lose if walkoff else None,   # サヨナラ=先攻は敗者
                     innings=innings,
                     note="bracket",
                     raw=f"{n1} {s1} - {s2} {n2}",

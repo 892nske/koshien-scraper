@@ -117,6 +117,12 @@ def test_bracket_format():
     final = [g for g in td.games if g.round_code == "f"]
     assert len(final) == 1 and final[0].winner_name == "浜松商", td.games
 
+    # サヨナラ(スコア末尾 x)でもペアリングが崩れないこと。勝者が後攻なので先攻=敗者
+    walkoff = [g for g in td.games if g.is_walkoff]
+    assert len(walkoff) == 1, td.games
+    assert walkoff[0].winner_name == "桐生" and walkoff[0].loser_name == "前橋"
+    assert walkoff[0].first_bat_name == "前橋"
+
     # byes を含んでも検証エラーが出ないこと
     errs = [i for i in validate(td) if i.level == "error"]
     assert not errs, errs
