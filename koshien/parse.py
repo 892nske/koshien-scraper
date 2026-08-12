@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from bs4 import BeautifulSoup, Tag
 
 from .normalize import (
+    LABEL_TO_CODE,
     ROUND_CODES,
     canonical_prefecture,
     normalize_school,
@@ -249,6 +250,57 @@ def parse_entries(soup: BeautifulSoup, season: str) -> list[EntryRow]:
                     consecutive_no=app["consecutive_no"],
                     appearance_raw=rec.get("appearance") or None,
                 ))
+
+    if not entries:                     # 表が無い年(主に春)は箇条書きから拾う
+        entries = _parse_entries_list(root, season)
+    return entries
+
+
+# 箇条書き出場校: '浜松商 （ 静岡 、14年ぶり4回目)' の 校名 / 都道府県 / 出場回数
+_ENTRY_LI_RE = re.compile(
+    r"^(?P<school>.+?)\s*[（(]\s*(?P<pref>[^、,]+?)\s*[、,]\s*(?P<rest>[^）)]*)"
+)
+
+
+def _parse_entries_list(root: Tag, season: str) -> list[EntryRow]:
+    """出場校が箇条書き(校名 （ 都道府県 、出場回数))の年を拾う。
+
+    表形式の parse_entries が0件だったときのフォールバック。春には地方大会が無いので
+    summer_qualifier は常に None(spring_qualifier 検証に整合)。
+    """
+    heading = None
+    for h in root.find_all(["h2", "h3"]):
+        t = normalize_text(h.get_text(" ", strip=True))
+        if "出場校" in t or "代表校" in t:
+            heading = h
+            break
+    if heading is None:
+        return []
+
+    entries: list[EntryRow] = []
+    seen: set[str] = set()
+    for sib in heading.find_all_next():
+        if sib.name == "h2" and sib is not heading:   # 次の大セクションで打ち切り
+            break
+        if sib.name != "ul":
+            continue
+        for li in sib.find_all("li", recursive=False):
+            m = _ENTRY_LI_RE.match(normalize_text(li.get_text(" ", strip=True)))
+            if not m:
+                continue
+            school = m.group("school").strip()
+            key = normalize_school(school)
+            if not school or key in seen:
+                continue
+            seen.add(key)
+            pref = canonical_prefecture(m.group("pref"))
+            entries.append(EntryRow(
+                school_name=school,
+                prefecture=pref,
+                region=prefecture_to_region(pref) if pref else None,
+                summer_qualifier=None,
+                appearance_raw=(m.group("rest").strip() or None),
+            ))
     return entries
 
 
@@ -489,6 +541,91 @@ def parse_linescores(root: Tag) -> list[GameRow]:
     return games
 
 
+def _bracket_date_innings(label: str | None) -> tuple[str | None, int | None]:
+    """ブラケットの日付セル(例: '3月27日(1):延長13回')から日付と延長回を取る。"""
+    if not label:
+        return None, None
+    innings = None
+    m = re.search(r"延長\s*(\d+)\s*回", label)
+    if m:
+        innings = int(m.group(1))
+    md = re.search(r"(\d+)\s*月\s*(\d+)\s*日", label)
+    gdate = f"{int(md.group(1)):02d}-{int(md.group(2)):02d}" if md else None
+    return gdate, innings
+
+
+def parse_bracket(root: Tag) -> list[GameRow]:
+    """トーナメント表(ブラケット)形式の試合を抽出する。
+
+    主に春(選抜)記事。左右2枚の表に、各ラウンドが「名前列 + スコア列」の対で並ぶ。
+    試合は連続2行(勝敗校名 + スコア)。日付は両列にまたがる colspan 行、値は rowspan で
+    複数行に複製される。掲載順が先攻/後攻を表すわけではないので打順は復元しない。
+
+    ラウンドはラベルを直訳せず round_code=None のまま返し、`assign_rounds_by_bracket`
+    に構造から逆算させる(byes のある代表数だとラベル直訳では検証が通らないため)。
+    返す試合はラウンド昇順(1回戦→決勝)に整列する(逆算は末尾から数えるため)。
+    """
+    collected: list[tuple[str, GameRow]] = []      # (round_code, game)
+    for table in root.find_all("table"):
+        grid = table_to_grid(table)
+        if len(grid) < 2:
+            continue
+        header = [normalize_text(c) for c in grid[0]]
+        # ラウンドラベルが colspan ペア(名前列/スコア列)で並ぶ列を拾う
+        round_cols: list[tuple[int, int, str]] = []
+        seen_labels: set[str] = set()
+        for j, c in enumerate(header):
+            if (c in LABEL_TO_CODE and c not in seen_labels
+                    and j + 1 < len(header) and header[j + 1] == c):
+                seen_labels.add(c)
+                round_cols.append((j, j + 1, LABEL_TO_CODE[c]))
+        if len(round_cols) < 2:                    # ブラケットは複数ラウンドが列で並ぶ
+            continue
+
+        for name_col, score_col, code in round_cols:
+            teams: list[tuple[str, int, str | None]] = []   # (校名, 得点, 直前の日付)
+            pending_date: str | None = None
+            prev: tuple[str, str] | None = None
+            for r in range(1, len(grid)):
+                row = grid[r]
+                name = normalize_text(row[name_col]) if name_col < len(row) else ""
+                score = normalize_text(row[score_col]) if score_col < len(row) else ""
+                if not name and not score:
+                    continue
+                if name and name == score:         # 日付など colspan 行 → ブロック境界
+                    pending_date = name
+                    prev = None
+                    continue
+                if not name or not score.isdigit():
+                    continue
+                if prev == (name, score):          # rowspan による複製
+                    continue
+                prev = (name, score)
+                teams.append((name, int(score), pending_date))
+
+            for k in range(0, len(teams) - 1, 2):  # 連続2件で1試合
+                (n1, s1, d1), (n2, s2, _d2) = teams[k], teams[k + 1]
+                if s1 >= s2:
+                    win, ws, lose, ls = n1, s1, n2, s2
+                else:
+                    win, ws, lose, ls = n2, s2, n1, s1
+                gdate, innings = _bracket_date_innings(d1)
+                collected.append((code, GameRow(
+                    round_code=None,               # 構造から逆算させる
+                    game_date=gdate,
+                    winner_name=win, winner_score=ws,
+                    loser_name=lose, loser_score=ls,
+                    innings=innings,
+                    note="bracket",
+                    raw=f"{n1} {s1} - {s2} {n2}",
+                )))
+
+    # 末尾から逆算できるようラウンド昇順に整列(ラベルのランクのみ利用)
+    rank = {c: i for i, c in enumerate(ROUND_CODES)}
+    collected.sort(key=lambda x: rank.get(x[0], len(ROUND_CODES)))
+    return [g for _, g in collected]
+
+
 def _pair_key(g: GameRow) -> frozenset:
     return frozenset({normalize_school(g.winner_name or ""),
                       normalize_school(g.loser_name or "")})
@@ -499,6 +636,10 @@ def parse_games(soup: BeautifulSoup) -> list[GameRow]:
     games = parse_games_table(root)
     if len(games) < 10:                 # 表が無ければ箇条書き形式とみなす
         games = parse_games_list(root)
+    if len(games) < 10:                 # それも無ければトーナメント表形式(主に春)
+        bracket = parse_bracket(root)
+        if bracket:
+            games = bracket
 
     # 一覧表/箇条書きから漏れた試合(主に決勝)をスコアボードから補完する
     known = {_pair_key(g) for g in games}
@@ -554,8 +695,11 @@ def assign_rounds_by_bracket(games: list[GameRow]) -> list[GameRow]:
     i = len(slots)
     for depth, code in enumerate(codes_desc):
         size = 2 ** depth
-        if code == "r1":
-            size = i                              # 残り全部
+        # 残りが1階層(2**depth)を満たさない場合、それは byes を含む初回=r1。
+        # 例: 30代表は末尾から f1・sf2・qf4・(2回戦)8 のあと 14 が残るが、これは
+        # r2枠(16)に詰めず r1 に集約する(でないと round_count が合わない)。
+        if code == "r1" or size >= i:
+            code, size = "r1", i                  # 残り全部を1回戦に
         start = max(i - size, 0)
         for slot in slots[start:i]:
             for g in slot:

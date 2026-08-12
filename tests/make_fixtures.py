@@ -310,8 +310,108 @@ def build_1978_real():
     (OUT / "summer_1978_real.html").write_text("".join(p), encoding="utf-8")
 
 
+def _bracket_table(rounds):
+    """トーナメント表(ブラケット)HTML を生成する。
+
+    実記事のブラケットは各ラウンドが「名前列 + スコア列」を占め、試合は連続2行、
+    日付は名前列・スコア列にまたがる colspan 行で載る。さらに rowspan で各セルの
+    値が複数行に複製される。ここではそれらの地雷を再現する:
+
+      - ラウンドごとに列ペア(名前, スコア)を割り当て(間にスペーサ列)。
+      - 日付行は名前列・スコア列が同一テキスト(colspan 相当)。
+      - チーム行は連続2行に同じ (名前, スコア) を複製(rowspan 相当)。
+
+    rounds: [(round_label, [(t1, s1, t2, s2, date), ...]), ...]
+    """
+    ncols = len(rounds) * 3           # 各ラウンド: 名前, スコア, スペーサ
+    grid: list[list[str | None]] = []
+
+    def put(r, c, text):
+        while len(grid) <= r:
+            grid.append([None] * ncols)
+        grid[r][c] = text
+
+    for i, (label, _) in enumerate(rounds):
+        put(0, i * 3, label)
+        put(0, i * 3 + 1, label)      # ラベルは名前列・スコア列にまたがる
+    for i, (_, matches) in enumerate(rounds):
+        nc, sc = i * 3, i * 3 + 1
+        r = 1
+        for t1, s1, t2, s2, date in matches:
+            put(r, nc, date)                                  # 日付(colspan)
+            put(r, sc, date)
+            r += 1
+            for name, score in ((t1, s1), (t1, s1), (t2, s2), (t2, s2)):  # rowspan複製
+                put(r, nc, name)
+                put(r, sc, str(score))
+                r += 1
+
+    rows = []
+    for row in grid:
+        tds = "".join(f"<td>{c if c is not None else ''}</td>" for c in row)
+        rows.append(f"<tr>{tds}</tr>")
+    return "<table>" + "".join(rows) + "</table>"
+
+
+def build_1978_spring():
+    """春(選抜)記事のレイアウトを模したフィクスチャ(第50回=1978を模写)。
+
+    春は夏と書式が異なり、現行 A/B/C では拾えない:
+
+      - 出場校が「校名 （ 都道府県 、出場回数)」の箇条書き(単一 <ul>)。
+      - 試合結果が左右2枚のトーナメント表(ブラケット)。
+      - 決勝はイニングスコアだけに載る。
+
+    6校/5試合の最小構成。byes を含む(準々決勝が無く 1回戦→準決勝)ため、
+    ラウンドは末尾から f1・sf2・r1(残り)= r1:2,sf:2,f:1 に逆算される。
+    """
+    p = ["<div class='mw-parser-output'><h2>出場校</h2>"]
+
+    # 箇条書き出場校(スペースゆれ・同一県複数校=群馬2校 を含む)
+    entries = [
+        ("浜松商", " 静岡 ", "14年ぶり4回目"),
+        ("桐生", "群馬", "11年ぶり12回目"),
+        ("前橋", " 群馬 ", "初出場"),
+        ("福井商", " 福井 ", "3年ぶり5回目"),
+        ("PL学園", "大阪", "6年ぶり6回目"),
+        ("箕島", " 和歌山 ", "2年連続5回目"),
+    ]
+    lis = "".join(f"<li>{s} （{q}、{a})</li>" for s, q, a in entries)
+    p.append(f"<ul>{lis}</ul>")
+
+    # 試合結果: 左右2枚のブラケット + 決勝スコアボード
+    p.append("<h2>試合結果</h2><h3>トーナメント表</h3>")
+    left = _bracket_table([
+        ("1回戦", [("桐生", 3, "前橋", 2, "3月27日(1)")]),
+        ("準決勝", [("浜松商", 5, "桐生", 1, "3月30日(1)")]),
+    ])
+    right = _bracket_table([
+        ("1回戦", [("PL学園", 4, "箕島", 0, "3月27日(2)")]),
+        ("準決勝", [("福井商", 6, "PL学園", 2, "3月30日(2)")]),
+    ])
+    p.append(left)
+    p.append(right)
+
+    # 決勝 = イニングスコア表(ヘッダは2行目、総得点列は R)
+    innings = "".join(f"<td>{v}</td>" for v in [0, 0, 1, 0, 0, 1, 0, 0, 0])
+    p.append(
+        "<h3>決勝</h3>"
+        "<table class='wikitable'>"
+        "<tr><th colspan='12'>スコアボード</th></tr>"
+        "<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>"
+        "<th>6</th><th>7</th><th>8</th><th>9</th><th>R</th><th>H</th></tr>"
+        f"<tr><td>福井商</td>{innings}<td>2</td><td>6</td></tr>"
+        f"<tr><td>浜松商</td>{innings}<td>3</td><td>8</td></tr>"
+        "</table>"
+    )
+
+    p.append("</div>")
+    (OUT / "spring_1978.html").write_text("".join(p), encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
     build_1978_real()
+    build_1978_spring()
     print("fixtures written to", OUT)

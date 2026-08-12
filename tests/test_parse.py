@@ -94,6 +94,35 @@ def test_real_article_pitfalls():
     print("  OK: 実記事レイアウト (1978)")
 
 
+def test_bracket_format():
+    """トーナメント表 + 箇条書き出場校(1978年春を模写)。
+
+      - 出場校が箇条書き(校名 （ 都道府県 、…))でも拾えて都道府県が解決する。
+      - 試合結果が左右2枚のブラケットでも抽出でき、byes があっても
+        ラウンド逆算・検証が通る。
+      - 決勝がイニングスコアだけでも拾えて no_final にならない。
+    """
+    html = (FIX / "spring_1978.html").read_text(encoding="utf-8")
+    td = parse_page(html, 1978, "spring", "fixture-spring", 0)
+
+    # 出場校: 6校、全件 都道府県 解決、春なので地方大会は無い
+    assert len(td.entries) == 6, [e.school_name for e in td.entries]
+    assert all(e.prefecture for e in td.entries), td.entries
+    assert all(e.summer_qualifier is None for e in td.entries)
+    gunma = [e for e in td.entries if e.prefecture == "群馬"]
+    assert {e.school_name for e in gunma} == {"桐生", "前橋"}   # 1県複数校
+
+    # 試合: 6校なので5試合。決勝1試合(浜松商優勝)、無敗1校
+    assert len(td.games) == 5, td.games
+    final = [g for g in td.games if g.round_code == "f"]
+    assert len(final) == 1 and final[0].winner_name == "浜松商", td.games
+
+    # byes を含んでも検証エラーが出ないこと
+    errs = [i for i in validate(td) if i.level == "error"]
+    assert not errs, errs
+    print("  OK: トーナメント表形式 (1978春)")
+
+
 def test_validation_catches_breakage():
     """試合を1件削れば検証がエラーを出すこと。"""
     td = load("summer_2014.html", 2014)
@@ -107,5 +136,6 @@ if __name__ == "__main__":
     test_table_format()
     test_list_format()
     test_real_article_pitfalls()
+    test_bracket_format()
     test_validation_catches_breakage()
     print("すべて通過")
