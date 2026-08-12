@@ -182,7 +182,7 @@ _SKIP_ENTRY_TABLE_CLASSES = frozenset(
 def parse_entries(soup: BeautifulSoup, season: str) -> list[EntryRow]:
     root = soup.select_one(".mw-parser-output") or soup
     entries: list[EntryRow] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str | None]] = set()
 
     for table in root.find_all("table"):
         # infobox/navbox は出場校表ではない。multicol 等のレイアウト用ラッパは
@@ -237,7 +237,9 @@ def parse_entries(soup: BeautifulSoup, season: str) -> list[EntryRow]:
                     and (table_is_21c or "21世紀枠" in rec.get("selection", ""))
                 )
 
-                key = normalize_school(school)
+                # 同名校が別県に存在するので、県込みで重複判定する
+                # (校名だけで dedup すると海星(三重)/海星(長崎)の片方が消える)
+                key = (normalize_school(school), pref)
                 if key in seen:
                     continue
                 seen.add(key)
@@ -280,7 +282,7 @@ def _parse_entries_list(root: Tag, season: str) -> list[EntryRow]:
         return []
 
     entries: list[EntryRow] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str | None]] = set()
     for sib in heading.find_all_next():
         if sib.name == "h2" and sib is not heading:   # 次の大セクションで打ち切り
             break
@@ -291,11 +293,11 @@ def _parse_entries_list(root: Tag, season: str) -> list[EntryRow]:
             if not m:
                 continue
             school = m.group("school").strip()
-            key = normalize_school(school)
+            pref = canonical_prefecture(m.group("pref"))
+            key = (normalize_school(school), pref)     # 同名校は県込みで区別
             if not school or key in seen:
                 continue
             seen.add(key)
-            pref = canonical_prefecture(m.group("pref"))
             entries.append(EntryRow(
                 school_name=school,
                 prefecture=pref,

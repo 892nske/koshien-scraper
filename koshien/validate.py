@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
-from .normalize import ROUND_CODES, normalize_school
+from .normalize import ROUND_CODES, normalize_school, split_school_pref
 from .parse import TournamentData
 
 
@@ -26,12 +26,27 @@ class Issue:
 
 def validate(td: TournamentData) -> list[Issue]:
     issues: list[Issue] = []
-    entry_keys = {normalize_school(e.school_name) for e in td.entries}
+
+    # 出場校の識別子は (校名キー, 都道府県)。同名校が別県に存在するので県で区別する。
+    idents = {(normalize_school(e.school_name), e.prefecture) for e in td.entries}
+    by_base: dict[str, dict] = {}
+    for base, pref in idents:
+        by_base.setdefault(base, {})[pref] = (base, pref)
+
+    def resolve(name: str | None):
+        """試合の校名を出場校の識別子に解決する。同名複数のときだけ県で確定する。"""
+        base, pref = split_school_pref(name or "")
+        cands = by_base.get(base)
+        if not cands:
+            return None
+        if len(cands) == 1:
+            return next(iter(cands.values()))   # 一意なら県は不問
+        return cands.get(pref)                   # 同名複数 → 名前の括弧県で確定
 
     # ---- 出場校 -------------------------------------------------------
     if not td.entries:
         issues.append(Issue("error", "no_entries", "出場校を1件も抽出できませんでした"))
-    if len(td.entries) != len(entry_keys):
+    if len(td.entries) != len(idents):
         issues.append(Issue("error", "dup_entries", "出場校に重複があります"))
 
     if td.season == "summer" and td.entries and not 47 <= len(td.entries) <= 60:
@@ -65,25 +80,23 @@ def validate(td: TournamentData) -> list[Issue]:
 
     unknown = set()
     losses: Counter = Counter()
-    wins: Counter = Counter()
     for g in td.games:
-        for name in (g.winner_name, g.loser_name):
-            k = normalize_school(name or "")
-            if entry_keys and k not in entry_keys:
+        wi, li = resolve(g.winner_name), resolve(g.loser_name)
+        for name, ident in ((g.winner_name, wi), (g.loser_name, li)):
+            if idents and ident is None:
                 unknown.add(name)
-        if not g.is_draw:
-            losses[normalize_school(g.loser_name or "")] += 1
-            wins[normalize_school(g.winner_name or "")] += 1
+        if not g.is_draw and li is not None:
+            losses[li] += 1
     if unknown:
         issues.append(Issue("error", "unknown_school",
                             "出場校表に無い学校名: " + ", ".join(sorted(unknown)[:10])))
 
-    for k, c in losses.items():
+    for ident, c in losses.items():
         if c > 1:
-            issues.append(Issue("error", "multi_loss", f"{k} が {c} 敗しています"))
+            issues.append(Issue("error", "multi_loss", f"{ident[0]} が {c} 敗しています"))
 
-    if entry_keys:
-        undefeated = entry_keys - set(losses)
+    if idents:
+        undefeated = idents - set(losses)
         if len(undefeated) != 1:
             issues.append(Issue("error", "champion",
                                 f"無敗の学校が{len(undefeated)}校です(1校であるべき)"))

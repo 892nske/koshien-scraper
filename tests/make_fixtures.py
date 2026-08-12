@@ -420,9 +420,61 @@ def build_1978_spring():
     (OUT / "spring_1978.html").write_text("".join(p), encoding="utf-8")
 
 
+def build_dupname_summer():
+    """同名校が別県に存在するケース(1989/1990 夏を模写)。
+
+    海星(三重) と 海星(長崎) が同じ大会に出場する。校名だけで名寄せすると
+    片方が dedup で消え、敗戦も合算されて multi_loss になる。出場校は県で区別し、
+    試合名は記事どおり括弧で県を明示する。16校の一覧表形式(=試合表が本線で拾われる
+    件数)にして、実記事同様に表パスで解析されるようにする。
+    """
+    # 16校。海星は三重・長崎の同名別県。地方大会名=都道府県(名寄せの県はここから解決)。
+    prefs = ["北北海道", "青森", "岩手", "宮城", "茨城", "群馬", "東東京", "神奈川",
+             "新潟", "静岡", "愛知", "大阪", "兵庫", "広島", "三重", "長崎"]
+    schools = ["旭川竜谷", "青森山田", "盛岡大付", "仙台育英", "常総学院", "前橋育英",
+               "帝京", "横浜", "日本文理", "静岡", "中京", "PL学園", "報徳学園",
+               "広陵", "海星", "海星"]
+    ent_rows = "".join(
+        f"<tr><td>{q}</td><td>{s}</td><td>初出場</td></tr>"
+        for q, s in zip(prefs, schools, strict=True)
+    )
+    entries_tbl = (
+        "<h2>出場校</h2><table class='wikitable'>"
+        "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    # 試合表示名: 同名の海星だけ括弧で県を明示(記事の慣習)。
+    display = list(schools)
+    display[14] = "海星(三重)"
+    display[15] = "海星(長崎)"
+
+    # 決定的な単純トーナメント(先頭 index が勝つ)。15試合、優勝=旭川竜谷。
+    game_rows = []
+    cur = list(display)
+    day = 10
+    while len(cur) > 1:
+        nxt, i, gm = [], 0, 1
+        while i + 1 < len(cur):
+            w, lo = cur[i], cur[i + 1]
+            game_rows.append((f"8月{day}日", f"第{gm}試合", w, "2 - 1", lo, ""))
+            nxt.append(w)
+            i += 2
+            gm += 1
+        if i < len(cur):          # 奇数なら不戦勝
+            nxt.append(cur[i])
+        cur, day = nxt, day + 1
+
+    # ラウンド見出しを付けず(round_code=None)、構造から逆算させる
+    games = "<h2>試合結果</h2>" + game_table(game_rows)
+    html = f"<div class='mw-parser-output'>{entries_tbl}{games}</div>"
+    (OUT / "summer_dupname.html").write_text(html, encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
     build_1978_real()
     build_1978_spring()
+    build_dupname_summer()
     print("fixtures written to", OUT)

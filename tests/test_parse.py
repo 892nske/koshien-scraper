@@ -143,6 +143,22 @@ def test_bracket_format():
     print("  OK: トーナメント表形式 (1978春)")
 
 
+def test_duplicate_name_schools():
+    """同名校が別県に存在(海星=三重/長崎)しても、県で区別して名寄せできること。"""
+    html = (FIX / "summer_dupname.html").read_text(encoding="utf-8")
+    td = parse_page(html, 1989, "summer", "fixture-dupname", 0)
+
+    # 海星が三重・長崎の2校とも残る(校名だけで dedup しない)
+    assert len(td.entries) == 16, [(e.school_name, e.prefecture) for e in td.entries]
+    kaisei = {e.prefecture for e in td.entries if e.school_name == "海星"}
+    assert kaisei == {"三重", "長崎"}, kaisei
+
+    # 県込み照合で multi_loss / champion / dup_entries / game_count が出ないこと
+    errs = [i for i in validate(td) if i.level == "error"]
+    assert not errs, errs
+    print("  OK: 同名校・別県の名寄せ")
+
+
 def test_validation_catches_breakage():
     """試合を1件削れば検証がエラーを出すこと。"""
     td = load("summer_2014.html", 2014)
@@ -158,5 +174,6 @@ if __name__ == "__main__":
     test_real_article_pitfalls()
     test_normalize_school_aliases()
     test_bracket_format()
+    test_duplicate_name_schools()
     test_validation_catches_breakage()
     print("すべて通過")

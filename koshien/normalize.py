@@ -45,6 +45,20 @@ def normalize_school(name: str) -> str:
     return _SCHOOL_RENAMES.get(s, s)                # 旧校名 → 現校名
 
 
+_NAME_PREF_RE = re.compile(r"[（(]\s*([^)）]+?)\s*[)）]")
+
+
+def split_school_pref(name: str) -> tuple[str, str | None]:
+    """同名校の県付き表記を分解する。'海星(長崎)' → (名寄せキー'海星', '長崎')。
+
+    括弧内が都道府県でなければ pref は None(名寄せキーは括弧を落として得る)。
+    同名校が別県に存在する場合の照合に使う(校名だけで名寄せしないため)。
+    """
+    m = _NAME_PREF_RE.search(name or "")
+    pref = canonical_prefecture(m.group(1)) if m else None
+    return normalize_school(name), pref
+
+
 def parse_appearance(text: str) -> dict:
     """「8年連続11回目」「3年ぶり23回目」「初出場」を構造化する。"""
     t = normalize_text(text)
