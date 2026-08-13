@@ -420,6 +420,73 @@ def build_1978_spring():
     (OUT / "spring_1978.html").write_text("".join(p), encoding="utf-8")
 
 
+def build_spring_entries_table():
+    """近年の春(選抜)の出場校表を模したフィクスチャ(2000年以降を模写)。
+
+    2000〜2025年の春はすべてこの表形式で、現行パーサでは entries=0 になる:
+
+      - ヘッダが「地区 | 選出校(colspan=2) | 出場回数」。校名列の見出し『選出校』が
+        colspan=2 で校名列と都道府県列の2列を覆う(2列目に固有の見出しが無い)。
+      - 『選出校』は _classify_header で「選出」を含むため selection(21世紀枠列)と
+        誤分類され、school 列なしと判定されてテーブルごと捨てられていた。
+      - 地区は rowspan で複数校にまたがり、2校目以降は地区セルを持たない行になる。
+      - 21世紀枠は別テーブルで、直前の見出し『21世紀枠』で判定する(列ではない)。
+
+    8校(一般6 + 21世紀枠2)の最小構成。1県複数校(京都=鳥羽/龍谷大平安)を含む。
+    """
+    def entries_table(heading, rows):
+        body = "".join(
+            # region が None の行は地区セルを省く(rowspan で上の行から継承)
+            (f"<tr><td rowspan='{rs}'>{reg}</td>" if reg else "<tr>")
+            + f"<td>{sch}</td><td>{pref}</td><td>{app}</td></tr>"
+            for reg, rs, sch, pref, app in rows
+        )
+        return (
+            f"<h3>{heading}</h3>"
+            "<table class='wikitable'>"
+            "<tr><th>地区</th><th colspan='2'>選出校</th><th>出場回数</th></tr>"
+            f"{body}</table>"
+        )
+
+    p = ["<div class='mw-parser-output'><h2>選出校</h2>"]
+    p.append(entries_table("一般選考", [
+        ("北海道", 1, "北照", "北海道", "2年ぶり2回目"),
+        ("東北", 1, "秋田経法大付", "秋田", "7年ぶり4回目"),
+    ]))
+    p.append(entries_table("一般選考", [
+        ("近畿", 2, "鳥羽", "京都", "53年ぶり2回目"),   # 地区が2校にまたがる
+        (None, 1, "龍谷大平安", "京都", "4年ぶり42回目"),  # 地区セル省略
+        ("東海", 1, "中京大中京", "愛知", "3年ぶり31回目"),
+        ("九州", 1, "東福岡", "福岡", "初出場"),
+    ]))
+    p.append(entries_table("21世紀枠", [
+        ("関東", 1, "石橋", "栃木", "初出場"),
+        ("北信越", 1, "氷見", "富山", "30年ぶり2回目"),
+    ]))
+
+    # 試合結果は一覧表(8校=7試合、優勝=北照)。検証を通すための最小トーナメント。
+    order = ["北照", "秋田経法大付", "鳥羽", "龍谷大平安",
+             "中京大中京", "東福岡", "石橋", "氷見"]
+    p.append("<h2>試合結果</h2>")
+    rounds, cur = [], list(order)
+    while len(cur) > 1:
+        rnd, nxt, i = [], [], 0
+        while i + 1 < len(cur):
+            rnd.append((cur[i], cur[i + 1]))
+            nxt.append(cur[i])
+            i += 2
+        rounds.append(rnd)
+        cur = nxt
+    for label, rnd in [("1回戦", rounds[0]), ("準決勝", rounds[1]),
+                       ("決勝", rounds[2])]:
+        rows = [(f"3月{25 + i}日", f"第{i + 1}試合", w, "2 - 1", lo, "")
+                for i, (w, lo) in enumerate(rnd)]
+        p.append(f"<h3>{label}</h3>" + game_table(rows))
+
+    p.append("</div>")
+    (OUT / "spring_entries_table.html").write_text("".join(p), encoding="utf-8")
+
+
 def build_dupname_summer():
     """同名校が別県に存在するケース(1989/1990 夏を模写)。
 
@@ -664,6 +731,7 @@ if __name__ == "__main__":
     build_1978()
     build_1978_real()
     build_1978_spring()
+    build_spring_entries_table()
     build_dupname_summer()
     build_mixed_format_summer()
     build_bracket_table_mix_summer()

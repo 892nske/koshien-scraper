@@ -168,6 +168,39 @@ def test_bracket_format():
     print("  OK: トーナメント表形式 (1978春)")
 
 
+def test_spring_entries_table():
+    """近年の春の出場校表(地区 | 選出校 colspan=2 | 出場回数)を拾えること(2000春〜)。
+
+      - 校名見出し『選出校』が selection と誤分類されず school として拾われる。
+      - colspan=2 の『選出校』が校名列 + 都道府県列に展開され、都道府県が解決する。
+      - 地区が rowspan で複数校にまたがっても(2校目に地区セルが無くても)拾える。
+      - 21世紀枠は別テーブル(直前見出し『21世紀枠』)で is_21st_century が立つ。
+    """
+    html = (FIX / "spring_entries_table.html").read_text(encoding="utf-8")
+    td = parse_page(html, 2000, "spring", "fixture-spring-tbl", 0)
+
+    # 8校ちょうど、全件 都道府県 解決、春なので地方大会は無い
+    assert len(td.entries) == 8, [(e.school_name, e.prefecture) for e in td.entries]
+    assert all(e.prefecture for e in td.entries), td.entries
+    assert all(e.summer_qualifier is None for e in td.entries)
+
+    e = {x.school_name: x for x in td.entries}
+    assert e["北照"].prefecture == "北海道"
+    assert e["龍谷大平安"].prefecture == "京都" and e["龍谷大平安"].region == "近畿"
+    # 1県複数校(京都=鳥羽/龍谷大平安)が両方残る
+    kyoto = {x.school_name for x in td.entries if x.prefecture == "京都"}
+    assert kyoto == {"鳥羽", "龍谷大平安"}, kyoto
+
+    # 21世紀枠は別テーブル見出しで判定。一般選考校は False。
+    assert e["石橋"].is_21st_century and e["氷見"].is_21st_century
+    assert not e["北照"].is_21st_century and not e["鳥羽"].is_21st_century
+
+    # 8校 → 7試合。トーナメントとして無矛盾。
+    assert len(td.games) == 7, td.games
+    assert not [i for i in validate(td) if i.level == "error"], validate(td)
+    print("  OK: 春の出場校表 (選出校 colspan)")
+
+
 def test_duplicate_name_schools():
     """同名校が別県に存在(海星=三重/長崎)しても、県で区別して名寄せできること。"""
     html = (FIX / "summer_dupname.html").read_text(encoding="utf-8")
@@ -261,6 +294,7 @@ if __name__ == "__main__":
     test_qualifier_split_variants()
     test_entries_list_heading_variants()
     test_bracket_format()
+    test_spring_entries_table()
     test_duplicate_name_schools()
     test_mixed_table_and_list()
     test_bracket_and_table_mix()

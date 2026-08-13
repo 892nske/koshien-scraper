@@ -121,7 +121,7 @@ _HEADER_FIELDS = {
     "qualifier": ("地方大会", "地区大会", "代表大会"),
     "region": ("地区", "ブロック"),
     "prefecture": ("都道府県", "所属", "県名"),
-    "school": ("代表校", "出場校", "学校名", "校名", "高校名"),
+    "school": ("代表校", "出場校", "選出校", "学校名", "校名", "高校名"),
     "appearance": ("出場回数", "回数", "出場"),
     "selection": ("選出", "区分", "枠"),
 }
@@ -136,6 +136,23 @@ def _classify_header(h: str) -> str | None:
     return None
 
 
+def _resolve_school_span(fields: list[str | None]) -> list[str | None]:
+    """校名見出しが colspan=2 で校名列+都道府県列を覆う表を救う。
+
+    近年の春(選抜)の出場校表は「選出校」見出しが colspan=2 で、実データは
+    校名 + 都道府県 の2列。table_to_grid が colspan を複製するため school が
+    2列続き、そのままでは都道府県列を school が上書きして県が解決できない。
+    都道府県列が別に無い場合に限り、連続する school の2列目を prefecture とみなす。
+    """
+    if "prefecture" in fields:
+        return fields
+    out = list(fields)
+    for i in range(1, len(out)):
+        if out[i] == "school" and out[i - 1] == "school":
+            out[i] = "prefecture"
+    return out
+
+
 def _detect_group(headers: list[str]) -> tuple[int, list[str | None]]:
     """1行に複数パネルが並ぶ表(例: 6列 = 3列×2)のグループ幅を推定する。"""
     fields = [_classify_header(h) for h in headers]
@@ -145,8 +162,8 @@ def _detect_group(headers: list[str]) -> tuple[int, list[str | None]]:
             continue
         if all(fields[i] == fields[i % g] for i in range(n)):
             if any(f is not None for f in fields[:g]):
-                return g, fields[:g]
-    return n, fields
+                return g, _resolve_school_span(fields[:g])
+    return n, _resolve_school_span(fields)
 
 
 def _find_header_row(grid: list[list[str]], max_scan: int = 4) -> tuple[int, int, list]:
