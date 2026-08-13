@@ -108,6 +108,17 @@ def test_normalize_school_aliases():
     print("  OK: 校名の名寄せ")
 
 
+def test_entries_list_heading_variants():
+    """出場校の箇条書きが『選出校』見出しでも拾えること(1995春)。"""
+    html = ("<div class='mw-parser-output'><h2>選出校</h2>"
+            "<ul><li>北海 （ 北海道 、7年ぶり11回目)</li>"
+            "<li>銚子商 （千葉、18年ぶり8回目)</li></ul></div>")
+    td = parse_page(html, 1995, "spring", "fixture", 0)
+    got = {(e.school_name, e.prefecture) for e in td.entries}
+    assert got == {("北海", "北海道"), ("銚子商", "千葉")}, got
+    print("  OK: 選出校見出し")
+
+
 def test_bracket_format():
     """トーナメント表 + 箇条書き出場校(1978年春を模写)。
 
@@ -177,6 +188,22 @@ def test_mixed_table_and_list():
     print("  OK: 表と箇条書きの混在")
 
 
+def test_bracket_and_table_mix():
+    """試合結果がブラケットと一覧表で混在していても、両方を統合して拾えること(1995夏)。"""
+    html = (FIX / "summer_bracket_table.html").read_text(encoding="utf-8")
+    td = parse_page(html, 1995, "summer", "fixture-bt", 0)
+
+    # 16校 → 15試合。ブラケット由来(1回戦)と表由来(準決勝)が両方含まれる。
+    assert len(td.games) == 15, [(g.round_code, g.note, g.raw) for g in td.games]
+    assert Counter(g.round_code for g in td.games) == Counter(
+        {"r1": 8, "qf": 4, "sf": 2, "f": 1}), Counter(g.round_code for g in td.games)
+    notes = {g.note for g in td.games}
+    assert "bracket" in notes and "linescore" in notes, notes
+
+    assert not [i for i in validate(td) if i.level == "error"], validate(td)
+    print("  OK: ブラケットと表の混在")
+
+
 def test_validation_catches_breakage():
     """試合を1件削れば検証がエラーを出すこと。"""
     td = load("summer_2014.html", 2014)
@@ -191,8 +218,10 @@ if __name__ == "__main__":
     test_list_format()
     test_real_article_pitfalls()
     test_normalize_school_aliases()
+    test_entries_list_heading_variants()
     test_bracket_format()
     test_duplicate_name_schools()
     test_mixed_table_and_list()
+    test_bracket_and_table_mix()
     test_validation_catches_breakage()
     print("すべて通過")

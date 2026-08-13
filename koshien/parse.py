@@ -275,7 +275,7 @@ def _parse_entries_list(root: Tag, season: str) -> list[EntryRow]:
     heading = None
     for h in root.find_all(["h2", "h3"]):
         t = normalize_text(h.get_text(" ", strip=True))
-        if "出場校" in t or "代表校" in t:
+        if "出場校" in t or "代表校" in t or "選出校" in t:
             heading = h
             break
     if heading is None:
@@ -644,32 +644,38 @@ def _pair_key(g: GameRow) -> frozenset:
 
 def parse_games(soup: BeautifulSoup) -> list[GameRow]:
     root = soup.select_one(".mw-parser-output") or soup
-    games = parse_games_table(root)
-    if len(games) >= 10:                 # 表が主。書式が混在する年は箇条書きで補完する
-        known = {_pair_key(g) for g in games}
-        for g in parse_games_list(root):
-            # ラウンド見出し配下(round_code 有)の試合だけ拾う。
-            # 概要節の説明文は _SCORE_RE に誤マッチするが round_code=None なので除外される。
-            if g.round_code and _pair_key(g) not in known:
+    games: list[GameRow] = []
+    known: set[frozenset] = set()
+
+    def _add(cands: list[GameRow], require_round: bool = False) -> None:
+        for g in cands:
+            # 概要節の説明文は _SCORE_RE に誤マッチするが round_code=None。
+            # 箇条書きが補助のときはこれらを除外する。
+            if require_round and not g.round_code:
+                continue
+            key = _pair_key(g)
+            if key not in known:
                 games.append(g)
-                known.add(_pair_key(g))
-    else:                               # 表が乏しければ箇条書きが主
-        games = parse_games_list(root)
-    if len(games) < 10:                 # それも無ければトーナメント表形式(主に春)
-        bracket = parse_bracket(root)
-        if bracket:
-            games = bracket
+                known.add(key)
+
+    # 同じ大会で書式が混在する年があるため全ソースを統合する。
+    # ブラケット(早いラウンド, round_code=None)を先に、次に表(遅いラウンド)を足すと、
+    # 末尾から逆算する assign_rounds_by_bracket 用のラウンド昇順が保たれる。
+    _add(parse_bracket(root))
+    _add(parse_games_table(root))
+    # 箇条書き: 主データ(まだ試合が乏しい)なら全件、補助データなら round 見出し配下のみ。
+    _add(parse_games_list(root), require_round=len(games) >= 10)
 
     # 一覧表/箇条書きから漏れた試合(主に決勝)をスコアボードから補完する
-    known = {_pair_key(g) for g in games}
     for g in parse_linescores(root):
-        if _pair_key(g) not in known:
+        key = _pair_key(g)
+        if key not in known:
             games.append(g)
-            known.add(_pair_key(g))
+            known.add(key)
         else:
             # 既知の試合でも、打順が未判明なら補完する
             for e in games:
-                if _pair_key(e) == _pair_key(g) and e.first_bat_name is None:
+                if _pair_key(e) == key and e.first_bat_name is None:
                     e.first_bat_name = g.first_bat_name
                     break
 

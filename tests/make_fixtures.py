@@ -536,6 +536,67 @@ def build_mixed_format_summer():
     (OUT / "summer_mixed.html").write_text(html, encoding="utf-8")
 
 
+def build_bracket_table_mix_summer():
+    """ブラケットと一覧表が混在する年(1995 夏を模写)。
+
+    1回戦〜準々決勝=トーナメント表(ブラケット)、準決勝=一覧表、決勝=イニングスコア。
+    片方だけ見ると試合を取りこぼす(ブラケットで上書きすると表の準決勝が消える)。
+    """
+    prefs = ["北北海道", "青森", "岩手", "宮城", "茨城", "群馬", "東東京", "神奈川",
+             "新潟", "静岡", "愛知", "大阪", "兵庫", "広島", "三重", "長崎"]
+    schools = ["旭川竜谷", "青森山田", "盛岡大付", "仙台育英", "常総学院", "前橋育英",
+               "帝京", "横浜", "日本文理", "静岡", "中京", "PL学園", "報徳学園",
+               "広陵", "四日市工", "海星"]
+    ent_rows = "".join(
+        f"<tr><td>{q}</td><td>{s}</td><td>初出場</td></tr>"
+        for q, s in zip(prefs, schools, strict=True)
+    )
+    entries_tbl = (
+        "<h2>代表校</h2><table class='wikitable'>"
+        "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    # 決定的トーナメント。先頭 index が勝つ。rounds[0]=8, [1]=4, [2]=2, [3]=1。
+    rounds, cur = [], list(schools)
+    while len(cur) > 1:
+        rnd, nxt, i = [], [], 0
+        while i + 1 < len(cur):
+            rnd.append((cur[i], cur[i + 1]))     # (勝者, 敗者)
+            nxt.append(cur[i])
+            i += 2
+        rounds.append(rnd)
+        cur = nxt
+
+    games = "<h2>組み合わせ・試合結果</h2>"
+    # 1回戦(8)+準々決勝(4)をブラケット表(ラウンド見出し2種以上)
+    br = [
+        ("1回戦", [(w, 2, lo, 1, "8月10日") for w, lo in rounds[0]]),
+        ("準々決勝", [(w, 3, lo, 1, "8月15日") for w, lo in rounds[1]]),
+    ]
+    games += _bracket_table(br)
+    # 準決勝(2)を一覧表
+    games += "<h3>準決勝</h3>" + game_table(
+        [("8月18日", f"第{i+1}試合", w, "4 - 2", lo, "")
+         for i, (w, lo) in enumerate(rounds[2])])
+    # 決勝(1)をイニングスコア
+    fw, fl = rounds[3][0]
+    innings = "".join(f"<td>{v}</td>" for v in [0, 0, 1, 0, 0, 1, 0, 0, 0])
+    games += (
+        "<h3>決勝</h3>"
+        "<table class='wikitable'>"
+        "<tr><th colspan='12'>スコアボード</th></tr>"
+        "<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>"
+        "<th>6</th><th>7</th><th>8</th><th>9</th><th>R</th><th>H</th></tr>"
+        f"<tr><td>{fl}</td>{innings}<td>2</td><td>6</td></tr>"
+        f"<tr><td>{fw}</td>{innings}<td>3</td><td>8</td></tr>"
+        "</table>"
+    )
+
+    html = f"<div class='mw-parser-output'>{entries_tbl}{games}</div>"
+    (OUT / "summer_bracket_table.html").write_text(html, encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
@@ -543,4 +604,5 @@ if __name__ == "__main__":
     build_1978_spring()
     build_dupname_summer()
     build_mixed_format_summer()
+    build_bracket_table_mix_summer()
     print("fixtures written to", OUT)

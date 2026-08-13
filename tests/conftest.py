@@ -14,6 +14,7 @@ def _ensure_fixtures():
         build_1978_real,
         build_1978_spring,
         build_2014,
+        build_bracket_table_mix_summer,
         build_dupname_summer,
         build_mixed_format_summer,
     )
@@ -31,3 +32,5 @@ def _ensure_fixtures():
         build_dupname_summer()
     if not (fix / "summer_mixed.html").exists():
         build_mixed_format_summer()
+    if not (fix / "summer_bracket_table.html").exists():
+        build_bracket_table_mix_summer()
