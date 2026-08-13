@@ -108,6 +108,20 @@ def test_normalize_school_aliases():
     print("  OK: 校名の名寄せ")
 
 
+def test_qualifier_split_variants():
+    """記念大会の分割枠: 年によって東西/南北の表記が違う。"""
+    from koshien.normalize import qualifier_to_prefecture
+    # 1998(第80回)は東西分割
+    assert qualifier_to_prefecture("東埼玉") == "埼玉"
+    assert qualifier_to_prefecture("西埼玉") == "埼玉"
+    assert qualifier_to_prefecture("東神奈川") == "神奈川"
+    assert qualifier_to_prefecture("西神奈川") == "神奈川"
+    # 2008/2018(第90/100回)の南北分割が壊れていないこと
+    assert qualifier_to_prefecture("北埼玉") == "埼玉"
+    assert qualifier_to_prefecture("北神奈川") == "神奈川"
+    print("  OK: 分割枠の表記ゆれ")
+
+
 def test_entries_list_heading_variants():
     """出場校の箇条書きが『選出校』見出しでも拾えること(1995春)。"""
     html = ("<div class='mw-parser-output'><h2>選出校</h2>"
@@ -244,6 +258,7 @@ if __name__ == "__main__":
     test_list_format()
     test_real_article_pitfalls()
     test_normalize_school_aliases()
+    test_qualifier_split_variants()
     test_entries_list_heading_variants()
     test_bracket_format()
     test_duplicate_name_schools()
