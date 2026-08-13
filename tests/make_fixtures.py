@@ -597,6 +597,68 @@ def build_bracket_table_mix_summer():
     (OUT / "summer_bracket_table.html").write_text(html, encoding="utf-8")
 
 
+def build_episode_prose_summer():
+    """「エピソード」節の散文が試合として誤検出されない年(1997夏を模写)。
+
+    試合結果の後ろに置かれた「エピソード」節の箇条書きに、逆転劇を語る散文
+    (「…当初 校A 1-9 校B と8点の大差…17-10 で逆転」)が入っている。この <li> は
+    埋め込みスコアが _SCORE_RE に誤マッチするうえ、直前の最後のラウンド見出しから
+    cur_round を引き継ぐため、round=None を除外する既存フィルタもすり抜けて幽霊試合を
+    1件生む。校名らしさのガード(勝者名/敗者名が散文なら不採用)でこれを止める。
+
+    build_mixed_format_summer は概要節(round=None)の散文を突くのに対し、こちらは
+    round が非None にリークした散文を突く別ケース。
+    """
+    prefs = ["北北海道", "青森", "岩手", "宮城", "茨城", "群馬", "東東京", "神奈川",
+             "新潟", "静岡", "愛知", "大阪", "兵庫", "広島", "三重", "長崎"]
+    schools = ["旭川竜谷", "青森山田", "盛岡大付", "仙台育英", "常総学院", "前橋育英",
+               "帝京", "横浜", "日本文理", "静岡", "中京", "PL学園", "報徳学園",
+               "広陵", "四日市工", "海星"]
+    ent_rows = "".join(
+        f"<tr><td>{q}</td><td>{s}</td><td>初出場</td></tr>"
+        for q, s in zip(prefs, schools, strict=True)
+    )
+    entries_tbl = (
+        "<h2>代表校</h2><table class='wikitable'>"
+        "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    # 決定的なトーナメント。先頭 index が勝つ。rounds[0]=8, [1]=4, [2]=2, [3]=1。
+    rounds, cur = [], list(schools)
+    while len(cur) > 1:
+        rnd, nxt, i = [], [], 0
+        while i + 1 < len(cur):
+            rnd.append((cur[i], cur[i + 1]))     # (勝者, 敗者)
+            nxt.append(cur[i])
+            i += 2
+        rounds.append(rnd)
+        cur = nxt
+
+    # 全試合を一覧表で掲載(errors=0 の完全なトーナメント)。ラウンド見出しがあるので
+    # 最後(決勝)で cur_round が非None のまま「エピソード」節に持ち越される。
+    games = "<h2>試合結果</h2>"
+    for ri, (label, rnd) in enumerate([("1回戦", rounds[0]), ("準々決勝", rounds[1]),
+                                       ("準決勝", rounds[2]), ("決勝", rounds[3])]):
+        rows = [(f"8月{15 + ri}日", f"第{i + 1}試合", w, "2 - 1", lo, "")
+                for i, (w, lo) in enumerate(rnd)]
+        games += f"<h3>{label}</h3>" + game_table(rows)
+
+    # エピソード: 逆転劇を語る散文の箇条書き。埋め込みスコア(校A 1-9 校B, 17-10)が
+    # 試合として拾われてはいけない。勝者/敗者名が文章になり読点・句点を含む。
+    a, b, pa, pb = schools[0], schools[1], prefs[0], prefs[1]
+    episode = (
+        "<h2>エピソード</h2><ul><li>"
+        f"1回戦の{a}（{pa}）対{b}（{pb}）戦では、当初3回終了時に{a} 1-9 {b}と"
+        f"8点の大差をつけられていた。だが{a}は6回裏に一挙10点を奪って逆転し、"
+        f"最終的に 17-10 で勝利した。"
+        "</li></ul>"
+    )
+
+    html = f"<div class='mw-parser-output'>{entries_tbl}{games}{episode}</div>"
+    (OUT / "summer_episode.html").write_text(html, encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
@@ -605,4 +667,5 @@ if __name__ == "__main__":
     build_dupname_summer()
     build_mixed_format_summer()
     build_bracket_table_mix_summer()
+    build_episode_prose_summer()
     print("fixtures written to", OUT)

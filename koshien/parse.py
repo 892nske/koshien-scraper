@@ -416,6 +416,16 @@ def parse_games_table(root: Tag) -> list[GameRow]:
     return games
 
 
+# 散文に埋め込まれたスコア(「…当初 市船橋 1-9 文徳と8点の大差…」等)を試合と
+# 誤認しないための校名らしさ判定。実データの校名は最長9文字で、読点・句点を含まない。
+_TEAM_MAX_LEN = 12
+
+
+def _looks_like_team(name: str) -> bool:
+    name = name.strip()
+    return bool(name) and len(name) <= _TEAM_MAX_LEN and not any(c in name for c in "、。")
+
+
 def parse_games_list(root: Tag) -> list[GameRow]:
     """箇条書き形式の試合結果を抽出する。"""
     games: list[GameRow] = []
@@ -442,6 +452,11 @@ def parse_games_list(root: Tag) -> list[GameRow]:
             m = _SCORE_RE.match(text)
             if not m:
                 continue
+            win, lose = m.group("w").strip(), m.group("l").strip()
+            # 散文の埋め込みスコアは _SCORE_RE に誤マッチするが、勝者/敗者名が
+            # 文章になる。校名らしくない側があれば試合として採用しない。
+            if not (_looks_like_team(win) and _looks_like_team(lose)):
+                continue
             ws, ls = int(m.group("ws")), int(m.group("ls"))
             wx, lx = bool(m.group("wx")), bool(m.group("lx"))
             note = m.group("note") or ""
@@ -450,12 +465,12 @@ def parse_games_list(root: Tag) -> list[GameRow]:
                 round_code=cur_round,
                 game_date=cur_date,
                 day_no=cur_day,
-                winner_name=m.group("w").strip(),
-                loser_name=m.group("l").strip(),
+                winner_name=win,
+                loser_name=lose,
                 winner_score=ws, loser_score=ls,
                 is_draw=(ws == ls),
                 is_walkoff=(wx or lx),
-                first_bat_name=(m.group("l").strip() if wx else None),
+                first_bat_name=(lose if wx else None),
                 innings=int(im.group(1)) if im else None,
                 note=note or None,
                 raw=text,

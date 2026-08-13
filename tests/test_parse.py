@@ -204,6 +204,32 @@ def test_bracket_and_table_mix():
     print("  OK: ブラケットと表の混在")
 
 
+def test_episode_prose_not_a_game():
+    """「エピソード」節の散文(埋め込みスコア)を試合として拾わないこと(1997夏)。
+
+    直前の最後のラウンド見出しから cur_round が非None のまま持ち越されるため、
+    round=None を除外する既存フィルタでは防げない。校名らしさのガードで止める。
+    """
+    html = (FIX / "summer_episode.html").read_text(encoding="utf-8")
+    td = parse_page(html, 1997, "summer", "fixture-episode", 0)
+
+    # 16校 → 15試合。散文の幽霊試合が1件も混じらない。
+    assert len(td.games) == 15, [(g.round_code, g.winner_name, g.raw) for g in td.games]
+    assert Counter(g.round_code for g in td.games) == Counter(
+        {"r1": 8, "qf": 4, "sf": 2, "f": 1}), Counter(g.round_code for g in td.games)
+
+    # 勝者名/敗者名に散文(読点・句点)が混じらない。
+    for g in td.games:
+        for name in (g.winner_name, g.loser_name):
+            assert not any(c in name for c in "、。"), name
+            assert len(name) <= 12, name
+
+    # game_count / unknown_school が出ないこと
+    errs = [i for i in validate(td) if i.level == "error"]
+    assert not errs, errs
+    print("  OK: エピソード節の散文を試合にしない")
+
+
 def test_validation_catches_breakage():
     """試合を1件削れば検証がエラーを出すこと。"""
     td = load("summer_2014.html", 2014)
@@ -223,5 +249,6 @@ if __name__ == "__main__":
     test_duplicate_name_schools()
     test_mixed_table_and_list()
     test_bracket_and_table_mix()
+    test_episode_prose_not_a_game()
     test_validation_catches_breakage()
     print("すべて通過")
