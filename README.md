@@ -181,8 +181,18 @@ cp .env.example .env      # KOSHIEN_UA と SUPABASE_DSN を記入
   漏洩したら Supabase Dashboard で **DB パスワードをローテーション**する。
 - **CI/本番では `.env` を置かず**、リポジトリ/環境のシークレットに格納して環境変数として注入する
   (アプリは `SUPABASE_DSN`、`supabase` CLI 用は `SUPABASE_ACCESS_TOKEN`)。
-- 接続文字列は direct(ポート5432)と pooler(Supavisor, ポート6543)がある。
-  安定ホストからのバッチ投入は direct/session モード、外部・サーバレスは pooler が目安。
+- 接続文字列は **通常 Session pooler を使う**
+  (`postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-0-<REGION>.pooler.supabase.com:5432/postgres`。
+  ユーザー名が `postgres.<ref>` になる点に注意)。IPv4 環境から到達できる。
+  direct 接続(`db.<ref>.supabase.co:5432`)は **IPv6 専用**なので、IPv4 のみの環境では使えない。
+  取得は Supabase Dashboard > Connect > Session pooler。
+
+#### つまずきポイント
+
+- `psycopg.OperationalError: ... "2406:..."(IPv6アドレス), port 5432 failed: Network is unreachable`
+  → direct 接続(IPv6専用)に IPv4 のみの環境から繋ごうとしている。
+  `SUPABASE_DSN` を上記の **Session pooler** に変える(WSL2 でよく起きる)。
+  なお `--dry-run` でも接続自体は張る(投入せずロールバックする挙動)ので、DB へ到達できないと失敗する。
 
 ### 開発
 
