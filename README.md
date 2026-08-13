@@ -59,6 +59,10 @@ koshien-scraper/
 │   ├── make_fixtures.py   実記事の構造を模したHTMLを生成
 │   ├── test_parse.py      回帰テスト
 │   └── fixtures/
+├── supabase/
+│   └── migrations/    DBスキーマ・マスタのマイグレーション(Supabase CLIで適用)
+├── docs/
+│   └── db-design.md   DBスキーマ設計の意図
 └── data/
     ├── cache/         取得したHTML(APIレスポンス)
     └── parsed/        構造化済みJSON(staging相当)
@@ -84,8 +88,8 @@ uv sync
 `uv.lock` と `pyproject.toml` の齟齬を検出させる。
 
 ```bash
-# Wikimediaのポリシーにより連絡先入りUAが必須
-export KOSHIEN_UA='koshien-db/0.1 (your-name; you@example.com)'
+# 環境変数は .env にまとめる(koshien が起動時に自動読み込みする)
+cp .env.example .env      # KOSHIEN_UA と SUPABASE_DSN を埋める。詳細は「接続情報の管理」
 
 # 1) 記事の存在確認とキャッシュ作成
 uv run koshien fetch --from 1978 --to 2025
@@ -100,7 +104,6 @@ uv run koshien debug --from 1978 --to 1978 --seasons spring
 uv run koshien validate --from 1978 --to 2025 -v
 
 # 4) Supabaseへ投入(まずはドライラン)
-export SUPABASE_DSN='postgresql://postgres:PASS@db.xxxx.supabase.co:5432/postgres'
 uv run koshien load --from 1978 --to 2025 --dry-run
 uv run koshien load --from 1978 --to 2025 --auto-create-schools
 ```
@@ -108,9 +111,78 @@ uv run koshien load --from 1978 --to 2025 --auto-create-schools
 `koshien` コマンドは `pyproject.toml` の `[project.scripts]` で定義しているため、
 `uv sync` 後は `uv run koshien ...` で呼べる(`python -m koshien.cli ...` も可)。
 
-`load` の前に `supabase/migrations/` のマイグレーションを適用しておくこと
-(`supabase db push`、もしくは Supabase の SQL Editor で番号順に実行)。
-書き込みは RLS を迂回する必要があるため、DSN には接続文字列(サービスロール相当)を使う。
+`load` の前に DB のスキーマとマスタを用意しておくこと(手順は下記
+「Supabase のセットアップ」)。接続情報(`SUPABASE_DSN` など)の扱いは
+「接続情報(シークレット)の管理」を参照。
+
+### Supabase のセットアップ(スキーマ・マスタ投入)
+
+スキーマとマスタは `supabase/migrations/` にマイグレーションとして入っている。
+Supabase CLI で適用する。
+
+```bash
+# 1) CLI を入れる(いずれか)
+brew install supabase/tap/supabase     # macOS / Linux (Homebrew)
+npm  i -g supabase                     # npm(または npx supabase ... で都度実行)
+# 詳細: https://supabase.com/docs/guides/cli
+
+# 2) CLI 設定(supabase/config.toml)が無ければ初期化。既存の migrations はそのまま使われる
+supabase init
+
+# 3) リモートの Supabase プロジェクトに接続(DBパスワードを聞かれる)
+supabase login
+supabase link --project-ref <PROJECT_REF>
+
+# 4) マイグレーションを番号順に適用(スキーマ + マスタを一括投入)
+supabase db push
+```
+
+適用されるマイグレーション:
+
+- `20260813000001_init_schema.sql` … 型・テーブル・制約・ビュー・RLS
+- `20260813000002_seed_master_data.sql` … 地区・都道府県・地方大会・ラウンドの参照マスタ
+
+マスタは外部キーの参照先で本番でも必須のため、意図的に `supabase/seed.sql` ではなく
+**マイグレーション**に置いている(seed.sql はローカルの `db reset` でしか流れない)。
+そのため `supabase db push` だけでスキーマ投入とマスタ投入が完結する。
+
+ローカルで試す場合(Docker が必要):
+
+```bash
+supabase start        # ローカル Postgres を起動
+supabase db reset     # 全マイグレーションを流し直す(マスタ込み)
+supabase status       # 接続文字列を確認 → SUPABASE_DSN に使う
+```
+
+スキーマとマスタが入ったら `koshien load` を実行する。
+
+### 接続情報(シークレット)の管理
+
+接続情報は2系統ある。混同しないこと。
+
+| 用途 | 何を使うか | 管理 |
+|---|---|---|
+| アプリ実行(`koshien load`) | `SUPABASE_DSN`(パスワード入り接続文字列) | `.env` / 環境変数 |
+| Supabase CLI(マイグレーション) | `supabase login`(アクセストークン)+ `supabase link`(project ref・DBパスワード) | CLI が `~/.supabase` 等に保持 |
+
+ローカル開発では `.env` にまとめる:
+
+```bash
+cp .env.example .env      # KOSHIEN_UA と SUPABASE_DSN を記入
+```
+
+`koshien` は起動時に `.env` を自動読み込みする(`python-dotenv`)。
+**既にシェルで `export` した環境変数や CI が注入した値があれば、そちらが優先**される。
+
+守ること:
+
+- **`.env` はコミットしない**(`.gitignore` 済み。テンプレの `.env.example` だけ追跡する)。
+- `SUPABASE_DSN` は **RLS を迂回するサービスロール相当**の強い権限。取り扱い注意。
+  漏洩したら Supabase Dashboard で **DB パスワードをローテーション**する。
+- **CI/本番では `.env` を置かず**、リポジトリ/環境のシークレットに格納して環境変数として注入する
+  (アプリは `SUPABASE_DSN`、`supabase` CLI 用は `SUPABASE_ACCESS_TOKEN`)。
+- 接続文字列は direct(ポート5432)と pooler(Supavisor, ポート6543)がある。
+  安定ホストからのバッチ投入は direct/session モード、外部・サーバレスは pooler が目安。
 
 ### 開発
 

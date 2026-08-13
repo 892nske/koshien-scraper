@@ -13,6 +13,8 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from .parse import EntryRow, GameRow, TournamentData, parse_page
 from .titles import candidate_titles, iter_targets
 from .validate import summarize, validate
@@ -106,6 +108,8 @@ def cmd_load(args) -> int:
 
 
 def main(argv=None) -> int:
+    # .env を読み込む(既存の環境変数が優先。シェルの export や CI 注入が勝つ)
+    load_dotenv()
     ap = argparse.ArgumentParser(prog="koshien")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
