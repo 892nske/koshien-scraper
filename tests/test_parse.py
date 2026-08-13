@@ -279,6 +279,31 @@ def test_bracket_and_table_mix():
     print("  OK: ブラケットと表の混在")
 
 
+def test_forfeit_game():
+    """不戦勝(出場辞退)がスコア無しの試合として拾われること(2021夏を模写)。
+
+    素朴な parse_bracket はスコアの無い不戦勝ノードを落とし、試合数不足(games=15でなく14)
+    と無敗校過多(辞退校が敗戦を持たず無敗のまま)で validate がエラーになっていた。
+    不戦勝を勝者=進出校・敗者=辞退校・スコア None・is_forfeit で記録して解消する。
+    """
+    html = (FIX / "summer_forfeit.html").read_text(encoding="utf-8")
+    td = parse_page(html, 2021, "summer", "fixture-forfeit", 0)
+
+    # 16校 → 15試合。うち1件が不戦勝。
+    assert len(td.games) == 15, [(g.round_code, g.note, g.raw) for g in td.games]
+    ff = [g for g in td.games if g.is_forfeit]
+    assert len(ff) == 1, ff
+    g = ff[0]
+    assert g.winner_name == "旭川竜谷" and g.loser_name == "青森山田", (g.winner_name, g.loser_name)
+    assert g.winner_score is None and g.loser_score is None, (g.winner_score, g.loser_score)
+    assert g.note == "forfeit"
+    assert not g.is_walkoff        # 不戦勝はサヨナラ(is_walkoff)とは別概念
+
+    # 辞退校に敗戦1が付き、無敗は優勝校のみ。試合数・無敗校数の不変条件がクリーン。
+    assert not [i for i in validate(td) if i.level == "error"], validate(td)
+    print("  OK: 不戦勝を試合として記録")
+
+
 def test_episode_prose_not_a_game():
     """「エピソード」節の散文(埋め込みスコア)を試合として拾わないこと(1997夏)。
 

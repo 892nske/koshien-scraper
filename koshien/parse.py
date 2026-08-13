@@ -61,6 +61,7 @@ class GameRow:
     loser_score: int | None = None
     is_draw: bool = False
     is_walkoff: bool = False
+    is_forfeit: bool = False              # 不戦勝(辞退)= スコア無し。サヨナラ(is_walkoff)とは別概念
     first_bat_name: str | None = None     # 判明した場合のみ
     innings: int | None = None
     replay_seq: int = 0
@@ -591,6 +592,7 @@ def _bracket_date_innings(label: str | None) -> tuple[str | None, int | None]:
 
 
 _BRACKET_SCORE_RE = re.compile(r"^(\d+)([xX])?$")   # 末尾 x = サヨナラ(勝者=後攻)
+_PAREN_RE = re.compile(r"[（(].*?[)）]")             # 校名に付く「(不戦勝)」等の括弧注記
 
 
 def parse_bracket(root: Tag) -> list[GameRow]:
@@ -625,6 +627,9 @@ def parse_bracket(root: Tag) -> list[GameRow]:
             teams: list[tuple[str, int, bool, str | None]] = []  # (校名,得点,サヨナラ,日付)
             pending_date: str | None = None
             prev: tuple[str, str] | None = None
+            # 不戦勝(辞退): 勝者セルが「〇〇(不戦勝)」でスコア列は空、直下に辞退校が並ぶ。
+            pending_forfeit: str | None = None     # 直前に見た不戦勝の勝者名(辞退校を待つ)
+            forfeit_prev: str | None = None        # 直前に確定した辞退校名(rowspan 複製の除去)
             for r in range(1, len(grid)):
                 row = grid[r]
                 name = normalize_text(row[name_col]) if name_col < len(row) else ""
@@ -634,9 +639,31 @@ def parse_bracket(root: Tag) -> list[GameRow]:
                 if name and name == score:         # 日付など colspan 行 → ブロック境界
                     pending_date = name
                     prev = None
+                    pending_forfeit = forfeit_prev = None
+                    continue
+                if name and "不戦勝" in name:        # 不戦勝の勝者ノード(スコア無し)
+                    win = _PAREN_RE.sub("", name).strip()
+                    if win != pending_forfeit:     # rowspan 複製は畳む
+                        pending_forfeit = win
+                        forfeit_prev = None
                     continue
                 m = _BRACKET_SCORE_RE.match(score)   # 末尾 x(サヨナラ)も許容する
                 if not name or not m:
+                    # スコア無しの校名で、直前が不戦勝の勝者なら、これが辞退校=敗者。
+                    if pending_forfeit and name and name != forfeit_prev:
+                        gdate, innings = _bracket_date_innings(pending_date)
+                        collected.append((code, GameRow(
+                            round_code=None,       # 構造から逆算させる
+                            game_date=gdate,
+                            winner_name=pending_forfeit, winner_score=None,
+                            loser_name=name, loser_score=None,
+                            is_forfeit=True,
+                            innings=innings,
+                            note="forfeit",
+                            raw=f"{pending_forfeit} (不戦勝) vs {name}",
+                        )))
+                        forfeit_prev = name
+                        pending_forfeit = None
                     continue
                 if prev == (name, score):          # rowspan による複製
                     continue

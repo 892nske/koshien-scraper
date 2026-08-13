@@ -171,8 +171,8 @@ class Loader:
         first_bat = None
         if g.first_bat_name:
             first_bat = entry_by_name.get(normalize_school(g.first_bat_name))
-        status = "draw" if g.is_draw else "final"
-        winner = None if g.is_draw else e1
+        status = "draw" if g.is_draw else ("forfeit" if g.is_forfeit else "final")
+        winner = None if g.is_draw else e1     # 不戦勝は進出校(=winner_name=e1)が勝者
         game_date = f"{td.year}-{g.game_date}" if g.game_date else None
 
         with self.conn.cursor() as cur:

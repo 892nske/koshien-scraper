@@ -322,6 +322,8 @@ def _bracket_table(rounds):
       - チーム行は連続2行に同じ (名前, スコア) を複製(rowspan 相当)。
 
     rounds: [(round_label, [(t1, s1, t2, s2, date), ...]), ...]
+    スコア s1/s2 が None の試合は不戦勝(辞退)を表す。勝者セルを「〇〇(不戦勝)」に、
+    スコア列を空にして、辞退校(t2)を直下に並べる(2021夏の実構造を再現)。
     """
     ncols = len(rounds) * 3           # 各ラウンド: 名前, スコア, スペーサ
     grid: list[list[str | None]] = []
@@ -341,9 +343,15 @@ def _bracket_table(rounds):
             put(r, nc, date)                                  # 日付(colspan)
             put(r, sc, date)
             r += 1
-            for name, score in ((t1, s1), (t1, s1), (t2, s2), (t2, s2)):  # rowspan複製
-                put(r, nc, name)
-                put(r, sc, str(score))
+            forfeit = s1 is None or s2 is None                # 不戦勝(スコア無し)
+            cells = ((t1, s1), (t1, s1), (t2, s2), (t2, s2))  # rowspan複製
+            for name, score in cells:
+                if forfeit:
+                    put(r, nc, f"{name}(不戦勝)" if name == t1 else name)
+                    put(r, sc, "")                            # スコア列は空
+                else:
+                    put(r, nc, name)
+                    put(r, sc, str(score))
                 r += 1
 
     rows = []
@@ -664,6 +672,61 @@ def build_bracket_table_mix_summer():
     (OUT / "summer_bracket_table.html").write_text(html, encoding="utf-8")
 
 
+def build_forfeit_summer():
+    """不戦勝(出場辞退)を含む夏(2021夏=第103回を模写)。
+
+    1校が出場を辞退し、対戦相手が不戦勝で進出する。ブラケットでは勝者セルが
+    「〇〇(不戦勝)」でスコア列が空、直下に辞退校が並ぶ。スコアが無いため素朴な
+    parse_bracket はこの2ノードを落とし、試合数不足(games=出場校-2)と
+    無敗校過多(辞退校が敗戦を持たず無敗のまま)を招いていた。
+    ここでは 1回戦の第1試合を不戦勝(辞退校=schools[1])として再現する。
+    """
+    prefs = ["北北海道", "青森", "岩手", "宮城", "茨城", "群馬", "東東京", "神奈川",
+             "新潟", "静岡", "愛知", "大阪", "兵庫", "広島", "三重", "長崎"]
+    schools = ["旭川竜谷", "青森山田", "盛岡大付", "仙台育英", "常総学院", "前橋育英",
+               "帝京", "横浜", "日本文理", "静岡", "中京", "PL学園", "報徳学園",
+               "広陵", "四日市工", "海星"]
+    ent_rows = "".join(
+        f"<tr><td>{q}</td><td>{s}</td><td>初出場</td></tr>"
+        for q, s in zip(prefs, schools, strict=True)
+    )
+    entries_tbl = (
+        "<h2>代表校</h2><table class='wikitable'>"
+        "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    # 決定的トーナメント(先頭 index が勝つ)。rounds[0]=8, [1]=4, [2]=2, [3]=1。
+    rounds, cur = [], list(schools)
+    while len(cur) > 1:
+        rnd, nxt, i = [], [], 0
+        while i + 1 < len(cur):
+            rnd.append((cur[i], cur[i + 1]))     # (勝者, 敗者)
+            nxt.append(cur[i])
+            i += 2
+        rounds.append(rnd)
+        cur = nxt
+
+    def matches(rnd, date, forfeit_first=False):
+        out = []
+        for idx, (w, lo) in enumerate(rnd):
+            if forfeit_first and idx == 0:       # 辞退校 lo が不戦勝で w に敗退
+                out.append((w, None, lo, None, date))
+            else:
+                out.append((w, 2, lo, 1, date))
+        return out
+
+    br = [
+        ("1回戦", matches(rounds[0], "8月10日", forfeit_first=True)),
+        ("準々決勝", matches(rounds[1], "8月15日")),
+        ("準決勝", matches(rounds[2], "8月18日")),
+        ("決勝", matches(rounds[3], "8月21日")),
+    ]
+    games = "<h2>組み合わせ・試合結果</h2>" + _bracket_table(br)
+    html = f"<div class='mw-parser-output'>{entries_tbl}{games}</div>"
+    (OUT / "summer_forfeit.html").write_text(html, encoding="utf-8")
+
+
 def build_episode_prose_summer():
     """「エピソード」節の散文が試合として誤検出されない年(1997夏を模写)。
 
@@ -793,6 +856,7 @@ if __name__ == "__main__":
     build_dupname_summer()
     build_mixed_format_summer()
     build_bracket_table_mix_summer()
+    build_forfeit_summer()
     build_episode_prose_summer()
     build_replay_final_summer()
     print("fixtures written to", OUT)
