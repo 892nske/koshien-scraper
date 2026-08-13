@@ -674,6 +674,15 @@ def _pair_key(g: GameRow) -> frozenset:
                       normalize_school(g.loser_name or "")})
 
 
+def _result_sig(g: GameRow) -> tuple:
+    """試合の結果指紋。引き分けは勝敗の向きが任意なのでスコアは集合で持つ。
+
+    同一カードの2試合(引き分け決勝 + 決勝再試合)を、再試合か単なる再パースの
+    重複かで区別するために使う。スコアと引き分けフラグが同じなら同一試合とみなす。
+    """
+    return (frozenset({g.winner_score, g.loser_score}), g.is_draw)
+
+
 def parse_games(soup: BeautifulSoup) -> list[GameRow]:
     root = soup.select_one(".mw-parser-output") or soup
     games: list[GameRow] = []
@@ -701,13 +710,18 @@ def parse_games(soup: BeautifulSoup) -> list[GameRow]:
     # 一覧表/箇条書きから漏れた試合(主に決勝)をスコアボードから補完する
     for g in parse_linescores(root):
         key = _pair_key(g)
-        if key not in known:
+        same_pair = [e for e in games if _pair_key(e) == key]
+        if not same_pair:
             games.append(g)
             known.add(key)
+        elif all(_result_sig(e) != _result_sig(g) for e in same_pair):
+            # 同一カードでも結果(スコア/引き分け)が違えば別試合 = 引き分け再試合。
+            # known は据え置き。後段の mark_replays が replay_seq を振る。
+            games.append(g)
         else:
-            # 既知の試合でも、打順が未判明なら補完する
-            for e in games:
-                if _pair_key(e) == key and e.first_bat_name is None:
+            # 同一試合の別ソース再パース。打順が未判明なら補完する。
+            for e in same_pair:
+                if e.first_bat_name is None:
                     e.first_bat_name = g.first_bat_name
                     break
 

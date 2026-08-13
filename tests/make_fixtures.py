@@ -726,6 +726,64 @@ def build_episode_prose_summer():
     (OUT / "summer_episode.html").write_text(html, encoding="utf-8")
 
 
+def build_replay_final_summer():
+    """決勝が引き分け再試合になった年(2006年夏を模写)。
+
+    決勝が延長で引き分けとなり、翌日に再試合が行われた年。記事では
+    「決勝」と「決勝再試合」の2枚のスコアボードが同一カードで並ぶ。
+    parse_linescores は両方を拾うが、parse_games のスコアボード補完が
+    校名ペアだけで重複排除していると、後段の再試合を「既知の重複」として
+    捨ててしまい、決勝が引き分け1試合だけ残る。すると is_draw のため敗戦が
+    数えられず、両決勝校が無敗になって champion エラーになる。
+
+    最小構成(4校/準決勝2 + 決勝引き分け + 決勝再試合 = 4試合)で固定する。
+    正しく拾えれば games = 出場校 − 1 + 再試合1 = 4、無敗は再試合の勝者1校。
+    """
+    entries = [
+        ("西東京", "早稲田実"),
+        ("南北海道", "駒大苫小牧"),
+        ("和歌山", "智弁和歌山"),
+        ("鹿児島", "鹿児島工"),
+    ]
+    ent_rows = "".join(
+        f"<tr><td>{q}</td><td>{s}</td><td>初出場</td></tr>" for q, s in entries
+    )
+    entries_tbl = (
+        "<h2>出場校</h2><table class='wikitable'>"
+        "<tr><th>地方大会</th><th>代表校</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    p = ["<div class='mw-parser-output'>", entries_tbl, "<h2>試合結果</h2>"]
+    p.append("<h3>準決勝</h3><ul>"
+             "<li>早稲田実 5 - 2 智弁和歌山</li>"
+             "<li>駒大苫小牧 3 - 1 鹿児島工</li>"
+             "</ul>")
+
+    # 決勝(引き分け)と決勝再試合を、同一カードのスコアボード2枚で掲載する。
+    # ヘッダは2行目・総得点列は R。上段=先攻。round_code はどちらも見出しから f。
+    def scoreboard(top, bot, top_r, bot_r):
+        head = ("<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>"
+                "<th>6</th><th>7</th><th>8</th><th>9</th><th>R</th><th>H</th></tr>")
+        blank = "<td>0</td>" * 9
+        return (
+            "<table class='wikitable'>"
+            "<tr><th colspan='12'>スコアボード</th></tr>"
+            f"{head}"
+            f"<tr><td>{top}</td>{blank}<td>{top_r}</td><td>5</td></tr>"
+            f"<tr><td>{bot}</td>{blank}<td>{bot_r}</td><td>7</td></tr>"
+            "</table>"
+        )
+
+    # 8/20 決勝: 駒大苫小牧 1 - 1 早稲田実(延長・引き分け)
+    p.append("<h3>決勝</h3>" + scoreboard("駒大苫小牧", "早稲田実", 1, 1))
+    # 8/21 決勝再試合: 早稲田実 4 - 3 駒大苫小牧(初優勝)
+    p.append("<h3>決勝再試合</h3>" + scoreboard("駒大苫小牧", "早稲田実", 3, 4))
+
+    p.append("</div>")
+    (OUT / "summer_replay_final.html").write_text("".join(p), encoding="utf-8")
+
+
 if __name__ == "__main__":
     build_2014()
     build_1978()
@@ -736,4 +794,5 @@ if __name__ == "__main__":
     build_mixed_format_summer()
     build_bracket_table_mix_summer()
     build_episode_prose_summer()
+    build_replay_final_summer()
     print("fixtures written to", OUT)

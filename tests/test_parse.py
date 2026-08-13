@@ -95,6 +95,34 @@ def test_real_article_pitfalls():
     print("  OK: 実記事レイアウト (1978)")
 
 
+def test_replay_final():
+    """決勝が引き分け再試合の年(2006年夏)を、再試合を捨てずに拾うこと。
+
+      - 同一カードのスコアボード2枚(引き分け決勝 + 決勝再試合)を別試合として保持。
+      - 再試合に replay_seq=1、引き分け側に is_draw=True。
+      - 敗戦は再試合でのみ数え、無敗ちょうど1校(=再試合の勝者)で errors=0。
+    """
+    td = load("summer_replay_final.html", 2006)
+
+    assert len(td.entries) == 4, [e.school_name for e in td.entries]
+    # 4校 → 準決勝2 + 決勝引き分け + 決勝再試合 = 4試合(= 出場校 − 1 + 再試合1)
+    assert len(td.games) == 4, td.games
+
+    finals = [g for g in td.games if g.round_code == "f"]
+    assert len(finals) == 2, finals
+    draw = [g for g in finals if g.is_draw]
+    replay = [g for g in finals if g.replay_seq > 0]
+    assert len(draw) == 1 and len(replay) == 1, finals
+    assert draw[0].replay_seq == 0 and replay[0].replay_seq == 1
+    # 再試合の勝者が優勝校。引き分け側は勝敗の向きが便宜的でも敗戦に数えない。
+    assert replay[0].winner_name == "早稲田実"
+    assert (replay[0].winner_score, replay[0].loser_score) == (4, 3)
+
+    errors = [i for i in validate(td) if i.level == "error"]
+    assert not errors, errors
+    print("  OK: 引き分け再試合 (2006)")
+
+
 def test_normalize_school_aliases():
     """校名の名寄せ: 改称・脚注マーカーを吸収し、既存の接尾辞/括弧除去は不変。"""
     # 旧校名 → 現校名(明徳 → 明徳義塾)
