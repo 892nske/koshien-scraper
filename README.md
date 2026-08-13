@@ -108,7 +108,8 @@ uv run koshien load --from 1978 --to 2025 --auto-create-schools
 `koshien` コマンドは `pyproject.toml` の `[project.scripts]` で定義しているため、
 `uv sync` 後は `uv run koshien ...` で呼べる(`python -m koshien.cli ...` も可)。
 
-`load` の前に `koshien_schema.sql` を Supabase の SQL Editor で実行しておくこと。
+`load` の前に `supabase/migrations/` のマイグレーションを適用しておくこと
+(`supabase db push`、もしくは Supabase の SQL Editor で番号順に実行)。
 書き込みは RLS を迂回する必要があるため、DSN には接続文字列(サービスロール相当)を使う。
 
 ### 開発

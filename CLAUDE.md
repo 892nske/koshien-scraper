@@ -114,7 +114,8 @@ C は A/B から漏れた試合(実記事では決勝がここにしかないこ
 
 ## DBスキーマで注意する点
 
-`koshien_schema.sql` を Supabase の SQL Editor で流してから `load` する。
+`supabase/migrations/` のマイグレーションを適用(`supabase db push`、または SQL Editor で
+番号順に実行)してから `load` する。
 
 - **春と夏で代表の階層が違う。** 夏 = 代表校 / 地方大会 / 都道府県 / 地区、
   春 = 代表校 / 都道府県 / 地区。地方大会は夏のみで、春の行では必ず NULL。
@@ -125,10 +126,11 @@ C は A/B から漏れた試合(実記事では決勝がここにしかないこ
 - `games` は `entry1_id` / `entry2_id`(掲載順。確定試合では entry1 = 勝利校)。
   先攻は `first_bat_entry_id` に判明時のみ入る。一意キーは向きに依存しないよう
   生成列 `pair_lo` / `pair_hi` を使う。
-- `games.status` は `final` / `draw` / **`forfeit`(不戦勝)**。不戦勝は勝敗のみで
-  スコアを持たないため `score1` / `score2` は NULL。**Supabase 側でスキーマを更新する:**
-  `status` の CHECK 制約に `'forfeit'` を追加し、`score1` / `score2` の NOT NULL を外す
-  (draw は両者スコアありなので NULL になるのは forfeit のみ)。
+- `games.status` は `final` / `draw` / **`forfeit`(不戦勝)** / `no_game` / `scheduled`。
+  不戦勝は**進出校を `winner_entry_id` に設定**し(=勝者あり)、試合が行われないため
+  `score1` / `score2` は NULL。スキーマ(`supabase/migrations/20260813000001_init_schema.sql`)は
+  enum・NULL 許容とも対応済みで、`games_status_winner_ck` が **final と forfeit のみ勝者必須**、
+  `games_forfeit_no_score_ck` が forfeit のスコア NULL を保証する。この2制約を壊さないこと。
 - 集計は `v_game_teams`(1試合を2行に展開したビュー)を使うと CASE 式が消えて楽。
 - 全 UPSERT は自然キー対象なので**何度実行しても結果は同じ**。この性質を壊さない。
 
