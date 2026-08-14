@@ -12,8 +12,41 @@ from pathlib import Path
 import psycopg
 from psycopg.rows import dict_row
 
-from .normalize import normalize_school
+from .normalize import canonical_prefecture, normalize_school, split_school_pref
 from .parse import EntryRow, GameRow, TournamentData
+
+# 校名(正規化)→ [(canonical_pref, entry_id), ...]。同名別県校を県で区別するための索引。
+EntryIndex = dict[str, list[tuple[str | None, int]]]
+
+
+def build_entry_index(rows: list[tuple[str, str | None, int]]) -> EntryIndex:
+    """(school_name, canonical_pref, entry_id) の並びから校名+県の索引を作る。
+
+    校名だけでキー化すると同名別県校(海星=三重/長崎)が潰れるため、
+    正規化校名をキーに、県付き候補のリストを値に持つ。
+    """
+    index: EntryIndex = {}
+    for name, pref, eid in rows:
+        index.setdefault(normalize_school(name), []).append((pref, eid))
+    return index
+
+
+def resolve_entry(index: EntryIndex, name: str) -> int | None:
+    """試合側の校名(例 '海星(三重)')から entry_id を引く。
+
+    括弧内に県があればそれで一意化する。括弧なしで候補が複数あるときは
+    あいまいなので None を返す(未解決として扱う)。
+    """
+    key, pref = split_school_pref(name or "")
+    cands = index.get(key, [])
+    if pref is not None:
+        for p, eid in cands:
+            if p == pref:
+                return eid
+        return None
+    if len(cands) == 1:
+        return cands[0][1]
+    return None
 
 
 class Loader:
@@ -161,16 +194,20 @@ class Loader:
             return cur.fetchone()["id"]
 
     def upsert_game(self, tid: int, td: TournamentData, g: GameRow,
-                    entry_by_name: dict[str, int]) -> None:
-        e1 = entry_by_name.get(normalize_school(g.winner_name or ""))
-        e2 = entry_by_name.get(normalize_school(g.loser_name or ""))
+                    index: EntryIndex) -> None:
+        e1 = resolve_entry(index, g.winner_name or "")
+        e2 = resolve_entry(index, g.loser_name or "")
         if e1 is None or e2 is None:
             self.unresolved.append(f"試合の学校未解決: {g.raw}")
+            return
+        if e1 == e2:
+            # 同名別県校の区別に失敗している。CHECK 制約で落ちる前に検知する。
+            self.unresolved.append(f"試合の学校が同一に解決: {g.raw}")
             return
 
         first_bat = None
         if g.first_bat_name:
-            first_bat = entry_by_name.get(normalize_school(g.first_bat_name))
+            first_bat = resolve_entry(index, g.first_bat_name)
         status = "draw" if g.is_draw else ("forfeit" if g.is_forfeit else "final")
         winner = None if g.is_draw else e1     # 不戦勝は進出校(=winner_name=e1)が勝者
         game_date = f"{td.year}-{g.game_date}" if g.game_date else None
@@ -204,19 +241,21 @@ class Loader:
     # ------------------------------------------------------------------
     def load(self, td: TournamentData) -> dict:
         tid = self.upsert_tournament(td)
-        entry_by_name: dict[str, int] = {}
+        index_rows: list[tuple[str, str | None, int]] = []
         for e in td.entries:
             eid = self.upsert_entry(tid, td, e)
             if eid:
-                entry_by_name[normalize_school(e.school_name)] = eid
+                pref = canonical_prefecture(e.prefecture) if e.prefecture else None
+                index_rows.append((e.school_name, pref, eid))
+        index = build_entry_index(index_rows)
         for g in td.games:
-            self.upsert_game(tid, td, g, entry_by_name)
+            self.upsert_game(tid, td, g, index)
 
         if self.dry_run:
             self.conn.rollback()
         else:
             self.conn.commit()
-        return {"tournament_id": tid, "entries": len(entry_by_name),
+        return {"tournament_id": tid, "entries": len(index_rows),
                 "games": len(td.games), "unresolved": len(self.unresolved)}
 
 
