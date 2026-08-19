@@ -310,7 +310,7 @@ def build_1978_real():
     (OUT / "summer_1978_real.html").write_text("".join(p), encoding="utf-8")
 
 
-def _bracket_table(rounds):
+def _bracket_table(rounds, forfeit_winner_first=True):
     """トーナメント表(ブラケット)HTML を生成する。
 
     実記事のブラケットは各ラウンドが「名前列 + スコア列」を占め、試合は連続2行、
@@ -322,8 +322,10 @@ def _bracket_table(rounds):
       - チーム行は連続2行に同じ (名前, スコア) を複製(rowspan 相当)。
 
     rounds: [(round_label, [(t1, s1, t2, s2, date), ...]), ...]
-    スコア s1/s2 が None の試合は不戦勝(辞退)を表す。勝者セルを「〇〇(不戦勝)」に、
-    スコア列を空にして、辞退校(t2)を直下に並べる(2021夏の実構造を再現)。
+    スコア s1/s2 が None の試合は不戦勝(辞退)を表す。勝者セルは「〇〇(不戦勝)」で
+    スコア列は空。**勝者(t1)と辞退校(t2)のどちらが上に並ぶかは年による**ため
+    forfeit_winner_first で選ぶ(True=2021夏、False=2022春の実構造)。
+    date が None の試合は日付行を出さない(2022春の不戦勝ブロックがこれ)。
     """
     ncols = len(rounds) * 3           # 各ラウンド: 名前, スコア, スペーサ
     grid: list[list[str | None]] = []
@@ -340,19 +342,21 @@ def _bracket_table(rounds):
         nc, sc = i * 3, i * 3 + 1
         r = 1
         for t1, s1, t2, s2, date in matches:
-            put(r, nc, date)                                  # 日付(colspan)
-            put(r, sc, date)
-            r += 1
-            forfeit = s1 is None or s2 is None                # 不戦勝(スコア無し)
-            cells = ((t1, s1), (t1, s1), (t2, s2), (t2, s2))  # rowspan複製
-            for name, score in cells:
-                if forfeit:
-                    put(r, nc, f"{name}(不戦勝)" if name == t1 else name)
-                    put(r, sc, "")                            # スコア列は空
-                else:
-                    put(r, nc, name)
-                    put(r, sc, str(score))
+            if date:                                          # 日付(colspan)
+                put(r, nc, date)
+                put(r, sc, date)
                 r += 1
+            if s1 is None or s2 is None:                      # 不戦勝(スコア無し)
+                nodes = [(f"{t1}(不戦勝)", ""), (t2, "")]
+                if not forfeit_winner_first:                  # 辞退校が上に並ぶ年
+                    nodes.reverse()
+            else:
+                nodes = [(t1, str(s1)), (t2, str(s2))]
+            for name, score in nodes:
+                for _ in range(2):                            # rowspan複製
+                    put(r, nc, name)
+                    put(r, sc, score)
+                    r += 1
 
     rows = []
     for row in grid:
@@ -727,6 +731,105 @@ def build_forfeit_summer():
     (OUT / "summer_forfeit.html").write_text(html, encoding="utf-8")
 
 
+# 2022春(第94回)の出場校32校。(地区, 校名, 都道府県)
+_SPRING_2022_ENTRIES = [
+    ("北海道", "クラーク国際", "北海道"),
+    ("東北", "花巻東", "岩手"), ("東北", "聖光学院", "福島"), ("東北", "只見", "福島"),
+    ("関東", "明秀日立", "茨城"), ("関東", "浦和学院", "埼玉"),
+    ("関東", "山梨学院", "山梨"), ("関東", "木更津総合", "千葉"),
+    ("東京", "国学院久我山", "東京"), ("東京", "二松学舎大付", "東京"),
+    ("北信越", "星稜", "石川"), ("北信越", "敦賀気比", "福井"),
+    ("北信越", "丹生", "福井"),
+    ("東海", "日大三島", "静岡"), ("東海", "大垣日大", "岐阜"),
+    ("近畿", "近江", "滋賀"), ("近畿", "天理", "奈良"),
+    ("近畿", "和歌山東", "和歌山"), ("近畿", "市和歌山", "和歌山"),
+    ("近畿", "大阪桐蔭", "大阪"), ("近畿", "金光大阪", "大阪"),
+    ("近畿", "東洋大姫路", "兵庫"),
+    ("中国", "倉敷工", "岡山"), ("中国", "広陵", "広島"), ("中国", "広島商", "広島"),
+    ("四国", "鳴門", "徳島"), ("四国", "高知", "高知"),
+    ("九州", "九州国際大付", "福岡"), ("九州", "有田工", "佐賀"),
+    ("九州", "長崎日大", "長崎"), ("九州", "大島", "鹿児島"),
+    ("九州", "大分舞鶴", "大分"),
+]
+
+
+def build_forfeit_spring():
+    """不戦勝の並びが「辞退校が先」の春(2022春=第94回を模写)。
+
+    2021夏(build_forfeit_summer)は「〇〇(不戦勝)」が上・辞退校が下だったが、
+    ブラケットの並びは組み合わせ順なので**逆になる年がある**。2022春は2回戦で
+    広島商(コロナで出場辞退)が上・大阪桐蔭(不戦勝)が下に並ぶ。勝者セルが先に
+    来る前提のパーサはスコア無しの辞退校行を捨ててしまい、試合数不足(30/31)と
+    無敗校過多(辞退校が無敗のまま)を招いていた。
+
+    さらに実記事では**不戦勝ブロックに日付行が無い**。直前ブロックの日付を
+    持ち越すと、行われていない試合に日付が付いてしまう。
+
+    32校のフル構成にしてあるのは、春の5ラウンド(1回戦16・2回戦8・準々決勝4・
+    準決勝2・決勝1)のラウンド割り当ても同時に検証するため。
+    """
+    ent_rows = "".join(
+        f"<tr><td>{reg}</td><td>{sch}</td><td>{pref}</td><td>初出場</td></tr>"
+        for reg, sch, pref in _SPRING_2022_ENTRIES
+    )
+    entries_tbl = (
+        "<h2>選出校</h2><table class='wikitable'>"
+        "<tr><th>地区</th><th>選出校</th><th>都道府県</th><th>出場回数</th></tr>"
+        + ent_rows + "</table>"
+    )
+
+    # 各山の1回戦(勝者, 敗者)。以降のラウンドは勝者同士を上から順に組ませる。
+    left_r1 = [("近江", "長崎日大"), ("浦和学院", "大分舞鶴"),
+               ("九州国際大付", "クラーク国際"), ("広陵", "敦賀気比"),
+               ("和歌山東", "倉敷工"), ("聖光学院", "二松学舎大付"),
+               ("木更津総合", "山梨学院"), ("金光大阪", "日大三島")]
+    # 大阪桐蔭・広島商を先頭2組に置き、両者の2回戦を不戦勝にする。
+    right_r1 = [("大阪桐蔭", "鳴門"), ("広島商", "丹生"),
+                ("国学院久我山", "有田工"), ("星稜", "天理"),
+                ("大垣日大", "只見"), ("市和歌山", "花巻東"),
+                ("明秀日立", "大島"), ("高知", "東洋大姫路")]
+
+    labels = ["1回戦", "2回戦", "準々決勝", "準決勝"]
+
+    def half(r1_pairs, forfeit_pair=None):
+        """先頭の校が勝つ決定的トーナメント。forfeit_pair の対戦だけ不戦勝にする。"""
+        rounds, pairs, day = [], list(r1_pairs), 19
+        for label in labels:
+            matches = []
+            for no, (win, lose) in enumerate(pairs, 1):
+                if forfeit_pair == (win, lose):
+                    matches.append((win, None, lose, None, None))   # 日付行なし
+                else:
+                    matches.append((win, 2, lose, 1, f"3月{day}日({no})"))
+            rounds.append((label, matches))
+            winners = [w for w, _ in pairs]
+            pairs = list(zip(winners[::2], winners[1::2], strict=False))
+            day += 3
+        return rounds, pairs
+
+    left, _ = half(left_r1)
+    right, _ = half(right_r1, forfeit_pair=("大阪桐蔭", "広島商"))
+
+    games = ("<h2>組み合わせ・試合結果</h2><h3>1回戦 - 準決勝</h3>"
+             + _bracket_table(left)
+             + _bracket_table(right, forfeit_winner_first=False))
+
+    # 決勝はブラケットに無く、イニングスコアだけに載る(実記事どおり)
+    innings = "".join(f"<td>{v}</td>" for v in [1, 1, 3, 0, 1, 4, 4, 4, 0])
+    final = (
+        "<h3>決勝</h3>"
+        "<table class='wikitable'>"
+        "<tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th>"
+        "<th>6</th><th>7</th><th>8</th><th>9</th><th>R</th><th>H</th></tr>"
+        f"<tr><td>大阪桐蔭</td>{innings}<td>18</td><td>16</td></tr>"
+        f"<tr><td>近江</td>{innings}<td>1</td><td>4</td></tr>"
+        "</table>"
+    )
+
+    html = f"<div class='mw-parser-output'>{entries_tbl}{games}{final}</div>"
+    (OUT / "spring_forfeit.html").write_text(html, encoding="utf-8")
+
+
 def build_episode_prose_summer():
     """「エピソード」節の散文が試合として誤検出されない年(1997夏を模写)。
 
@@ -857,6 +960,7 @@ if __name__ == "__main__":
     build_mixed_format_summer()
     build_bracket_table_mix_summer()
     build_forfeit_summer()
+    build_forfeit_spring()
     build_episode_prose_summer()
     build_replay_final_summer()
     print("fixtures written to", OUT)

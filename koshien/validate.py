@@ -6,7 +6,7 @@
   - 試合数 = 出場校数 - 1 (引き分け再試合は加算)
   - 敗戦は1校につき最大1回
   - 無敗の学校がちょうど1校(優勝校)
-  - ラウンドごとの試合数が末尾から 1, 2, 4, 8, … になる
+  - ラウンドごとの試合数が末尾から 1, 2, 4, 8, … になる(最初のラウンドは byes を含む)
 """
 from __future__ import annotations
 
@@ -102,14 +102,18 @@ def validate(td: TournamentData) -> list[Issue]:
                                 f"無敗の学校が{len(undefeated)}校です(1校であるべき)"))
 
     # ---- ラウンド -----------------------------------------------------
+    # 試合数は末尾から 1, 2, 4, 8, … になる。ラウンド名ではなく**位置**で見ること。
+    # 春32校は 1回戦16・2回戦8・準々決勝4… の5ラウンドで、8試合のラウンドが r2 になる
+    # (夏49代表は6ラウンドで r3 が8試合)。最初のラウンドは byes を含むので数えない。
     by_round = Counter(g.round_code for g in td.games if g.replay_seq == 0)
-    for i, code in enumerate(reversed(ROUND_CODES)):
-        if code == "r1":
+    present = [(code, by_round[code]) for code in ROUND_CODES if by_round.get(code)]
+    for i, (code, count) in enumerate(reversed(present)):
+        if i == len(present) - 1:
             break
         want = 2 ** i
-        if by_round.get(code, 0) not in (0, want):
+        if count != want:
             issues.append(Issue("error", "round_count",
-                                f"{code} の試合数が {by_round[code]}(期待 {want})"))
+                                f"{code} の試合数が {count}(期待 {want})"))
     if by_round.get("f", 0) != 1:
         issues.append(Issue("error", "no_final", "決勝が1試合ではありません"))
 

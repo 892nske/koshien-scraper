@@ -304,6 +304,37 @@ def test_forfeit_game():
     print("  OK: 不戦勝を試合として記録")
 
 
+def test_forfeit_game_withdrawn_first():
+    """不戦勝が「辞退校が先・不戦勝の勝者が後」に並ぶ年(2022春を模写)。
+
+    ブラケットの並びは組み合わせ順なので、2021夏(勝者が先)と逆になる年がある。
+    勝者セルが先に来る前提だとスコア無しの辞退校行を捨ててしまい、試合数不足
+    (30/31)と無敗校過多(辞退校が無敗のまま)が同時に出ていた。
+    不戦勝ブロックには日付行が無いため、直前ブロックの日付を持ち越さないことも見る。
+    """
+    html = (FIX / "spring_forfeit.html").read_text(encoding="utf-8")
+    td = parse_page(html, 2022, "spring", "fixture-forfeit-spring", 0)
+
+    # 32校 → 31試合。春の5ラウンド構成(16強戦は r2 であって r3 ではない)。
+    assert len(td.entries) == 32, len(td.entries)
+    assert len(td.games) == 31, [(g.round_code, g.note, g.raw) for g in td.games]
+    assert Counter(g.round_code for g in td.games) == Counter(
+        {"r1": 16, "r2": 8, "qf": 4, "sf": 2, "f": 1}
+    ), Counter(g.round_code for g in td.games)
+
+    ff = [g for g in td.games if g.is_forfeit]
+    assert len(ff) == 1, ff
+    g = ff[0]
+    assert (g.winner_name, g.loser_name) == ("大阪桐蔭", "広島商"), (g.winner_name, g.loser_name)
+    assert g.winner_score is None and g.loser_score is None, (g.winner_score, g.loser_score)
+    assert g.round_code == "r2" and g.note == "forfeit"
+    assert not g.is_walkoff
+    assert g.game_date is None, g.game_date      # 直前ブロックの日付を持ち越さない
+
+    assert not [i for i in validate(td) if i.level == "error"], validate(td)
+    print("  OK: 辞退校が先に並ぶ不戦勝")
+
+
 def test_episode_prose_not_a_game():
     """「エピソード」節の散文(埋め込みスコア)を試合として拾わないこと(1997夏)。
 
@@ -351,6 +382,8 @@ if __name__ == "__main__":
     test_duplicate_name_schools()
     test_mixed_table_and_list()
     test_bracket_and_table_mix()
+    test_forfeit_game()
+    test_forfeit_game_withdrawn_first()
     test_episode_prose_not_a_game()
     test_validation_catches_breakage()
     print("すべて通過")

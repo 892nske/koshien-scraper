@@ -17,6 +17,7 @@ def _ensure_fixtures():
         build_bracket_table_mix_summer,
         build_dupname_summer,
         build_episode_prose_summer,
+        build_forfeit_spring,
         build_forfeit_summer,
         build_mixed_format_summer,
         build_replay_final_summer,
@@ -40,6 +41,8 @@ def _ensure_fixtures():
         build_bracket_table_mix_summer()
     if not (fix / "summer_forfeit.html").exists():
         build_forfeit_summer()
+    if not (fix / "spring_forfeit.html").exists():
+        build_forfeit_spring()
     if not (fix / "summer_episode.html").exists():
         build_episode_prose_summer()
     if not (fix / "summer_replay_final.html").exists():

@@ -97,14 +97,29 @@ def cmd_load(args) -> int:
     if not dsn:
         print("DSN が必要です (--dsn または環境変数 SUPABASE_DSN)", file=sys.stderr)
         return 2
+    ng = 0
     for year, season in iter_targets(args.start, args.end, args.seasons):
         p = PARSED_DIR / f"{_slug(year, season)}.json"
         if not p.exists():
             continue
         res = load_file(p, dsn, auto_create_schools=args.auto_create_schools,
                         dry_run=args.dry_run)
-        print(f"  {year} {season}: {res}")
-    return 0
+        # 投入数は必ず総数と並べて出す。分母が無いと、マスタ不足で entry が
+        # 捨てられていても数字だけでは気づけない(1998夏の 55 → 51)。
+        print(f"  {year} {season}: tournament_id={res['tournament_id']} "
+              f"entries={res['entries']}/{res['entry_total']} "
+              f"games={res['games']}/{res['game_total']} "
+              f"unresolved={res['unresolved']}")
+        if res["unresolved"]:
+            ng += 1
+            if args.verbose:
+                for d in res["details"][:10]:
+                    print(f"      - {d}")
+                if res["unresolved"] > 10:
+                    print(f"      … 他 {res['unresolved'] - 10} 件")
+
+    print(f"\n未解決のある大会: {ng} 件")
+    return 1 if ng else 0
 
 
 def main(argv=None) -> int:

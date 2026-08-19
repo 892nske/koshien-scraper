@@ -194,16 +194,17 @@ class Loader:
             return cur.fetchone()["id"]
 
     def upsert_game(self, tid: int, td: TournamentData, g: GameRow,
-                    index: EntryIndex) -> None:
+                    index: EntryIndex) -> bool:
+        """1試合を UPSERT する。学校を解決できず投入しなかった場合は False。"""
         e1 = resolve_entry(index, g.winner_name or "")
         e2 = resolve_entry(index, g.loser_name or "")
         if e1 is None or e2 is None:
             self.unresolved.append(f"試合の学校未解決: {g.raw}")
-            return
+            return False
         if e1 == e2:
             # 同名別県校の区別に失敗している。CHECK 制約で落ちる前に検知する。
             self.unresolved.append(f"試合の学校が同一に解決: {g.raw}")
-            return
+            return False
 
         first_bat = None
         if g.first_bat_name:
@@ -237,6 +238,7 @@ class Loader:
                  winner, first_bat, g.is_walkoff, status, g.replay_seq,
                  g.note, td.source_url),
             )
+        return True
 
     # ------------------------------------------------------------------
     def load(self, td: TournamentData) -> dict:
@@ -248,15 +250,19 @@ class Loader:
                 pref = canonical_prefecture(e.prefecture) if e.prefecture else None
                 index_rows.append((e.school_name, pref, eid))
         index = build_entry_index(index_rows)
-        for g in td.games:
-            self.upsert_game(tid, td, g, index)
+        games = sum(self.upsert_game(tid, td, g, index) for g in td.games)
 
         if self.dry_run:
             self.conn.rollback()
         else:
             self.conn.commit()
-        return {"tournament_id": tid, "entries": len(index_rows),
-                "games": len(td.games), "unresolved": len(self.unresolved)}
+        # entries / games は**投入できた数**。総数と並べて返さないと、
+        # マスタ不足で entry が捨てられていること自体に気づけない
+        # (1998夏は summer_qualifiers に東埼玉等が無く 55 → 51 になっていた)。
+        return {"tournament_id": tid,
+                "entries": len(index_rows), "entry_total": len(td.entries),
+                "games": games, "game_total": len(td.games),
+                "unresolved": len(self.unresolved), "details": list(self.unresolved)}
 
 
 def load_file(path: str | Path, dsn: str, **kw) -> dict:

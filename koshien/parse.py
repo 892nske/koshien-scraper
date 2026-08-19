@@ -595,6 +595,21 @@ _BRACKET_SCORE_RE = re.compile(r"^(\d+)([xX])?$")   # 末尾 x = サヨナラ(�
 _PAREN_RE = re.compile(r"[（(].*?[)）]")             # 校名に付く「(不戦勝)」等の括弧注記
 
 
+def _forfeit_game(win: str, lose: str, date_label: str | None) -> GameRow:
+    """不戦勝(出場辞退)の試合。行われないためスコアは持たない。"""
+    gdate, innings = _bracket_date_innings(date_label)
+    return GameRow(
+        round_code=None,                   # 構造から逆算させる
+        game_date=gdate,
+        winner_name=win, winner_score=None,
+        loser_name=lose, loser_score=None,
+        is_forfeit=True,
+        innings=innings,
+        note="forfeit",
+        raw=f"{win} (不戦勝) vs {lose}",
+    )
+
+
 def parse_bracket(root: Tag) -> list[GameRow]:
     """トーナメント表(ブラケット)形式の試合を抽出する。
 
@@ -626,10 +641,15 @@ def parse_bracket(root: Tag) -> list[GameRow]:
         for name_col, score_col, code in round_cols:
             teams: list[tuple[str, int, bool, str | None]] = []  # (校名,得点,サヨナラ,日付)
             pending_date: str | None = None
+            date_mark = 0                          # 日付行を見た時点の len(teams)
             prev: tuple[str, str] | None = None
-            # 不戦勝(辞退): 勝者セルが「〇〇(不戦勝)」でスコア列は空、直下に辞退校が並ぶ。
-            pending_forfeit: str | None = None     # 直前に見た不戦勝の勝者名(辞退校を待つ)
-            forfeit_prev: str | None = None        # 直前に確定した辞退校名(rowspan 複製の除去)
+            # 不戦勝(辞退): 「〇〇(不戦勝)」と辞退校がスコア列を空にして2ノード並ぶ。
+            # どちらが上かは組み合わせ順しだいなので両方の順序を受ける
+            # (2021夏 = 勝者が先 / 2022春 = 辞退校が先)。
+            pending_forfeit: str | None = None     # 不戦勝の勝者(辞退校を待つ)
+            pending_withdraw: str | None = None    # スコア無しの校名(不戦勝ノードを待つ)
+            emitted: set[str] = set()              # 確定済みの2校(rowspan 複製の除去)
+
             for r in range(1, len(grid)):
                 row = grid[r]
                 name = normalize_text(row[name_col]) if name_col < len(row) else ""
@@ -638,36 +658,43 @@ def parse_bracket(root: Tag) -> list[GameRow]:
                     continue
                 if name and name == score:         # 日付など colspan 行 → ブロック境界
                     pending_date = name
+                    date_mark = len(teams)
                     prev = None
-                    pending_forfeit = forfeit_prev = None
+                    pending_forfeit = pending_withdraw = None
+                    emitted = set()
                     continue
                 if name and "不戦勝" in name:        # 不戦勝の勝者ノード(スコア無し)
                     win = _PAREN_RE.sub("", name).strip()
-                    if win != pending_forfeit:     # rowspan 複製は畳む
+                    if win in emitted or win == pending_forfeit:
+                        continue                   # rowspan 複製は畳む
+                    if pending_withdraw:           # 辞退校が先に並ぶ年
+                        # 行われない試合なので、日付行を持たないブロックでは日付を付けない
+                        collected.append((code, _forfeit_game(
+                            win, pending_withdraw,
+                            pending_date if date_mark == len(teams) else None)))
+                        emitted = {win, pending_withdraw}
+                        pending_withdraw = None
+                    else:
                         pending_forfeit = win
-                        forfeit_prev = None
                     continue
                 m = _BRACKET_SCORE_RE.match(score)   # 末尾 x(サヨナラ)も許容する
                 if not name or not m:
-                    # スコア無しの校名で、直前が不戦勝の勝者なら、これが辞退校=敗者。
-                    if pending_forfeit and name and name != forfeit_prev:
-                        gdate, innings = _bracket_date_innings(pending_date)
-                        collected.append((code, GameRow(
-                            round_code=None,       # 構造から逆算させる
-                            game_date=gdate,
-                            winner_name=pending_forfeit, winner_score=None,
-                            loser_name=name, loser_score=None,
-                            is_forfeit=True,
-                            innings=innings,
-                            note="forfeit",
-                            raw=f"{pending_forfeit} (不戦勝) vs {name}",
-                        )))
-                        forfeit_prev = name
+                    if not name or name in emitted or name == pending_withdraw:
+                        continue                   # rowspan 複製は畳む
+                    if pending_forfeit:            # 勝者が先に並ぶ年 → これが辞退校
+                        collected.append((code, _forfeit_game(
+                            pending_forfeit, name,
+                            pending_date if date_mark == len(teams) else None)))
+                        emitted = {pending_forfeit, name}
                         pending_forfeit = None
+                    else:                          # 不戦勝ノードが後に来るかもしれない
+                        pending_withdraw = name
                     continue
                 if prev == (name, score):          # rowspan による複製
                     continue
                 prev = (name, score)
+                pending_forfeit = pending_withdraw = None
+                emitted = set()
                 teams.append((name, int(m.group(1)), bool(m.group(2)), pending_date))
 
             for k in range(0, len(teams) - 1, 2):  # 連続2件で1試合
@@ -779,8 +806,13 @@ def mark_replays(games: list[GameRow]) -> list[GameRow]:
 def assign_rounds_by_bracket(games: list[GameRow]) -> list[GameRow]:
     """トーナメント構造からラウンドを逆算する。
 
-    決勝1試合・準決勝2試合・準々決勝4試合…と末尾から割り当て、
-    残りを1回戦とする。引き分け再試合は同じ枠として1つに数える。
+    決勝1試合・準決勝2試合・準々決勝4試合…と末尾から区切り、残り(byes を含む)を
+    最初のラウンドにまとめる。引き分け再試合は同じ枠として1つに数える。
+
+    **番号付きラウンド(1回戦…)の名前は先頭から昇順に振る。** 末尾からの深さで
+    固定するとラウンド数が変わったときに破綻する。例えば春32校は
+    1回戦16・2回戦8・準々決勝4… の5ラウンド構成で、16強戦は r2 であって r3 ではない
+    (夏49代表は r1:17・r2:16・r3:8 の6ラウンドで、こちらは従来どおり)。
     """
     slots: list[list[GameRow]] = []
     for g in games:
@@ -789,22 +821,30 @@ def assign_rounds_by_bracket(games: list[GameRow]) -> list[GameRow]:
         else:
             slots.append([g])
 
-    codes_desc = list(reversed(ROUND_CODES))     # f, sf, qf, r3, r2, r1
+    ranges: list[tuple[str | None, int, int]] = []   # (コード, 開始, 終了)
     i = len(slots)
-    for depth, code in enumerate(codes_desc):
+    for depth in range(len(ROUND_CODES)):
         size = 2 ** depth
-        # 残りが1階層(2**depth)を満たさない場合、それは byes を含む初回=r1。
-        # 例: 30代表は末尾から f1・sf2・qf4・(2回戦)8 のあと 14 が残るが、これは
-        # r2枠(16)に詰めず r1 に集約する(でないと round_count が合わない)。
-        if code == "r1" or size >= i:
-            code, size = "r1", i                  # 残り全部を1回戦に
-        start = max(i - size, 0)
-        for slot in slots[start:i]:
+        if size >= i:                            # 残りが1階層に満たない = byes 込みの初回
+            ranges.append((None, 0, i))
+            i = 0
+            break
+        code = ROUND_CODES[-1 - depth] if depth < 3 else None   # f, sf, qf / 番号付き
+        ranges.append((code, i - size, i))
+        i -= size
+    if i > 0:
+        ranges.append((None, 0, i))
+
+    # 番号付きラウンドは早い方から r1, r2, r3 …(甲子園は3回戦まで)
+    numbered = [k for k, (code, _, _) in enumerate(ranges) if code is None]
+    for n, k in enumerate(reversed(numbered)):
+        code, start, end = ranges[k]
+        ranges[k] = (ROUND_CODES[min(n, 2)], start, end)
+
+    for code, start, end in ranges:
+        for slot in slots[start:end]:
             for g in slot:
                 g.round_code = code
-        i = start
-        if i <= 0:
-            break
     return games
 
 
